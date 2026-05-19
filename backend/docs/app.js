@@ -545,7 +545,9 @@ async function loadLogs(page) {
 
   var pag = pagination(logsPage, data.total, 50, 'loadLogs');
 
-  c.innerHTML = '<div class="page-header"><h2>Logs</h2><div class="actions"><button class="btn btn-ghost" onclick="loadLogs(' + logsPage + ')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Atualizar</button></div></div>' +
+  c.innerHTML = '<div class="page-header"><h2>Logs</h2><div class="actions">' +
+    '<button class="btn btn-danger btn-sm" onclick="clearLogs()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg> Limpar Logs</button>' +
+    '<button class="btn btn-ghost" onclick="loadLogs(' + logsPage + ')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Atualizar</button></div></div>' +
     '<div class="table-container">' +
     '<div class="table-toolbar"><div class="search-box">' +
     '<input type="text" id="logSearch" placeholder="Buscar nos logs..." value="' + esc(search) + '" onkeypress="if(event.key===\'Enter\')loadLogs(1)">' +
@@ -553,6 +555,15 @@ async function loadLogs(page) {
     '</div><button class="btn btn-ghost btn-sm" onclick="loadLogs(' + logsPage + ')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></div>' +
     '<div style="max-height:600px;overflow-y:auto">' + logsHtml + '</div>' +
     '<div class="table-footer">' + pag + '</div></div>';
+}
+
+async function clearLogs() {
+  showConfirm('Limpar Logs', 'Deseja deletar todos os logs? Esta ação não pode ser desfeita.', function () {
+    api('DELETE', '/admin/logs').then(function (data) {
+      if (data && data.success) { showToast('Logs limpos!', 'success'); loadLogs(1); }
+      else showToast(data ? data.message : 'Erro', 'error');
+    });
+  });
 }
 
 // ============================================================
