@@ -160,6 +160,25 @@ function toggleSidebar() {
 }
 
 // ============================================================
+//  Desktop Sidebar Collapse Toggle
+// ============================================================
+function toggleSidebarCollapse() {
+  var sidebar = document.getElementById('sidebar');
+  sidebar.classList.toggle('collapsed');
+  var isCollapsed = sidebar.classList.contains('collapsed');
+  localStorage.setItem('sidebar_collapsed', isCollapsed ? '1' : '0');
+}
+
+// Restaurar estado da sidebar ao carregar
+(function restoreSidebarState() {
+  var collapsed = localStorage.getItem('sidebar_collapsed');
+  if (collapsed === '1') {
+    var sidebar = document.getElementById('sidebar');
+    if (sidebar) sidebar.classList.add('collapsed');
+  }
+})();
+
+// ============================================================
 //  Auth
 // ============================================================
 function showLogin() {
