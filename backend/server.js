@@ -21,7 +21,7 @@ const ADMIN_PASSWORD = "1";
 
 const app = express();
 app.use(cors({
-  origin: ['https://visctorjoao8-eng.github.io', 'http://localhost:3000'],
+  origin: ['https://visctorjoao8-eng.github.io', 'https://pedrin-xits-panel.onrender.com', 'http://localhost:3000'],
   credentials: true
 }));
 app.use(express.json());
