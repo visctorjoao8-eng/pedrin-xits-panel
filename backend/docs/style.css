@@ -414,11 +414,17 @@ body::before {
 .nav-icon {
   width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
   flex-shrink: 0; transition: all var(--transition);
+  color: var(--text-secondary);
 }
 
-.nav-item:hover .nav-icon { transform: scale(1.1); }
+.nav-item:hover .nav-icon { transform: scale(1.1); color: var(--text-primary); }
 
-.nav-icon svg { display: block; transition: all var(--transition); }
+.nav-icon svg {
+  display: block;
+  transition: all var(--transition);
+  stroke: var(--text-secondary);
+  fill: none;
+}
 
 .sidebar-footer { padding: 16px 12px; border-top: 1px solid rgba(255,255,255,0.04); }
 
