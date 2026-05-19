@@ -391,6 +391,7 @@ async function loadKeys(page) {
 
   c.innerHTML = '<div class="page-header"><h2>Licenças</h2><div class="actions">' +
     '<button class="btn btn-ghost btn-sm" onclick="togglePauseAll()" id="pauseAllBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pausar Todas</button>' +
+    '<button class="btn btn-ghost btn-sm" onclick="exportKeys()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Exportar .TXT</button>' +
     '<button class="btn btn-primary" onclick="showCreateKeysModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Gerar Keys</button></div></div>' +
     '<div class="table-container">' +
     '<div class="table-toolbar"><div class="search-box">' +
@@ -524,6 +525,65 @@ async function unbanKey(id) {
   var data = await api('PUT', '/admin/keys/' + id, { status: 'active' });
   if (data && data.success) { showToast('Key desbanida!', 'success'); loadKeys(keysPage); }
   else showToast(data ? data.message : 'Erro', 'error');
+}
+
+async function exportKeys() {
+  var sf = (document.getElementById('keyStatusFilter') || {}).value || '';
+  var search = (document.getElementById('keySearch') || {}).value || '';
+
+  var url = '/admin/keys?page=1&limit=9999';
+  if (sf) url += '&status=' + sf;
+  if (search) url += '&search=' + encodeURIComponent(search);
+
+  var data = await api('GET', url);
+  if (!data || !data.success) {
+    showToast('Erro ao exportar keys.', 'error');
+    return;
+  }
+
+  if (data.keys.length === 0) {
+    showToast('Nenhuma key para exportar.', 'info');
+    return;
+  }
+
+  var lines = [];
+  lines.push('========================================');
+  lines.push('  PEDRIN XITS - Exportação de Keys');
+  lines.push('  Data: ' + new Date().toLocaleString('pt-BR'));
+  lines.push('  Total: ' + data.keys.length + ' keys');
+  lines.push('========================================');
+  lines.push('');
+
+  for (var i = 0; i < data.keys.length; i++) {
+    var k = data.keys[i];
+    var statusLabel = k.paused ? 'paused' : k.status;
+    var durationLabel = k.is_lifetime ? 'LIFETIME' : k.duration_days + 'd';
+    var clientLabel = k.client_name || '-';
+    var expiresLabel = k.expires_at ? k.expires_at : (k.is_lifetime ? 'Nunca' : '-');
+
+    lines.push('Key: ' + k.key);
+    lines.push('Status: ' + statusLabel);
+    lines.push('Client: ' + clientLabel);
+    lines.push('Duração: ' + durationLabel);
+    lines.push('HWID: ' + (k.hwid || '-'));
+    lines.push('Criada: ' + (k.created_at || '-'));
+    lines.push('Expira: ' + expiresLabel);
+    lines.push('Ativada: ' + (k.activated_at || '-'));
+    lines.push('----------------------------------------');
+  }
+
+  var text = lines.join('\n');
+  var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  var url2 = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url2;
+  a.download = 'pedrin-xits-keys-' + new Date().toISOString().slice(0, 10) + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url2);
+
+  showToast(data.keys.length + ' keys exportadas!', 'success');
 }
 
 async function deleteKey(id) {
