@@ -6,8 +6,10 @@ let currentPage = 'dashboard';
 let keysPage = 1;
 let logsPage = 1;
 
-// URL do backend (Render.com) - ajuste após o deploy
-const API_BASE = 'https://pedrin-xits-panel.onrender.com';
+// URL do backend - detecta automaticamente
+const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? '' // Usa o mesmo servidor quando local
+  : 'https://pedrin-xits-panel.onrender.com';
 
 // ============================================================
 //  API Helper
