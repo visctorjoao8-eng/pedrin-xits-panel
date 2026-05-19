@@ -30,7 +30,7 @@
 // ============================================================
 //  CONFIGURAÇÃO - Altere para o seu servidor
 // ============================================================
-const std::string SERVER_URL   = "http://localhost:3000";
+const std::string SERVER_URL   = "https://pedrin-xits-panel.onrender.com";
 const std::string APP_NAME     = "Pedrin Xits";
 const std::string OWNER_ID     = "3616b50c-8ff3-4629-a89b-11c53f3f3643";
 const std::string APP_SECRET   = "1facb137182890f342db9067b80c779107c29fb1ff3d595934b6bdb01f51fa1d"; // hex

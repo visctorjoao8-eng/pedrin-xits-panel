@@ -334,7 +334,7 @@ private:
     //  Se estiver rodando localmente: http://localhost:3000
     //  Se hospedado, coloque a URL pública: https://seu-dominio.com
     // ============================================================
-    std::string api_url = "http://localhost:3000";
+    std::string api_url = "https://pedrin-xits-panel.onrender.com";
 
 public:
     struct stc_client {
