@@ -6,15 +6,19 @@ let currentPage = 'dashboard';
 let keysPage = 1;
 let logsPage = 1;
 
+// URL do backend (Render.com) - ajuste após o deploy
+const API_BASE = 'https://pedrin-xits-panel.onrender.com';
+
 // ============================================================
 //  API Helper
 // ============================================================
 async function api(method, url, body) {
+  var fullUrl = API_BASE + url;
   var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
   if (token) opts.headers['Authorization'] = 'Bearer ' + token;
   if (body) opts.body = JSON.stringify(body);
   try {
-    var res = await fetch(url, opts);
+    var res = await fetch(fullUrl, opts);
     var data = await res.json();
     if (res.status === 401) {
       token = '';

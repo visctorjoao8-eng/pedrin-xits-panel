@@ -11,6 +11,7 @@ const path = require('path');
 //  Configuração
 // ============================================================
 const PORT = process.env.PORT || 3000;
+const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || '';
 const JWT_SECRET = crypto.randomBytes(32).toString('hex');
 const APP_NAME = "Pedrin Xits";
 const OWNER_ID = "3616b50c-8ff3-4629-a89b-11c53f3f3643";
@@ -19,7 +20,10 @@ const ADMIN_USERNAME = "1";
 const ADMIN_PASSWORD = "1";
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: ['https://visctorjoao8-eng.github.io', 'http://localhost:3000'],
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
