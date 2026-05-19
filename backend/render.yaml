@@ -3,8 +3,10 @@ services:
     name: pedrin-xits-panel
     runtime: node
     plan: free
-    buildCommand: apt-get update && apt-get install -y python3 make g++ && npm install
+    buildCommand: npm install
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: 20
