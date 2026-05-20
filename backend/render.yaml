@@ -1,9 +1,3 @@
-databases:
-  - name: pedrin-xits-db
-    plan: free
-    databaseName: pedrin_xits
-    ipAllowList: []
-
 services:
   - type: web
     name: pedrin-xits-panel
@@ -17,9 +11,7 @@ services:
       - key: NODE_VERSION
         value: 20
       - key: DATABASE_URL
-        fromDatabase:
-          name: pedrin-xits-db
-          property: connectionString
+        value: "postgresql://neondb_owner:npg_R7W0oDfMpjOZ@ep-square-cell-aq5wc419.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require"
       - key: ADMIN_USERNAME
         value: "1"
       - key: ADMIN_PASSWORD
