@@ -16,3 +16,5 @@ services:
         value: "1"
       - key: ADMIN_PASSWORD
         value: "1"
+      - key: JWT_SECRET
+        value: "pedrin-xits-jwt-secret-2024-prod-key-abc123"

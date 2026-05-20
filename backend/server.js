@@ -31,15 +31,51 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ============================================================
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 15000,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
+});
+
+// Tratar erros de conexão inesperados no pool
+pool.on('error', (err) => {
+  console.error('[DB] Erro inesperado no pool de conexoes:', err.message);
 });
 
 // ============================================================
 //  Inicializar Database
 // ============================================================
-async function initDatabase() {
-  const client = await pool.connect();
+let dbConnected = false;
+
+// ============================================================
+//  Keep-Alive do Banco de Dados
+//  (Impede que o Neon suspenda o compute por inatividade)
+// ============================================================
+async function keepDatabaseAlive() {
   try {
+    const result = await pool.query('SELECT 1');
+    if (!dbConnected) {
+      console.log('[DB] Conexao com banco reestabelecida!');
+      dbConnected = true;
+    }
+  } catch (err) {
+    dbConnected = false;
+    console.error('[DB] Keep-alive falhou:', err.message);
+  }
+}
+
+// Pingar o banco a cada 2 minutos para manter Neon ativo
+setInterval(keepDatabaseAlive, 2 * 60 * 1000);
+
+// ============================================================
+//  Inicializar Database (com retry)
+// ============================================================
+async function initDatabase(retries = 5) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    const client = await pool.connect();
+    try {
     // Tabelas
     await client.query(`
       CREATE TABLE IF NOT EXISTS app_settings (
@@ -124,9 +160,21 @@ async function initDatabase() {
       ['app_secret', APP_SECRET]
     );
 
-    console.log('[DB] PostgreSQL Database initialized successfully');
-  } finally {
-    client.release();
+      dbConnected = true;
+      console.log('[DB] PostgreSQL Database initialized successfully');
+      return; // Sucesso, sair do loop
+    } catch (err) {
+      console.error(`[DB] Tentativa ${attempt}/${retries} falhou:`, err.message);
+      if (attempt === retries) {
+        throw new Error(`Falha ao inicializar banco apos ${retries} tentativas: ${err.message}`);
+      }
+      // Esperar antes de tentar novamente (backoff exponencial)
+      const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+      console.log(`[DB] Aguardando ${delay}ms antes da proxima tentativa...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    } finally {
+      client.release();
+    }
   }
 }
 
@@ -134,7 +182,11 @@ async function initDatabase() {
 //  Funções Auxiliares
 // ============================================================
 async function addLog(action, details, ip) {
-  await pool.query('INSERT INTO logs (action, details, ip_address) VALUES ($1, $2, $3)', [action, details || '', ip || '']);
+  try {
+    await pool.query('INSERT INTO logs (action, details, ip_address) VALUES ($1, $2, $3)', [action, details || '', ip || '']);
+  } catch (err) {
+    console.error('[DB] Erro ao adicionar log:', err.message);
+  }
 }
 
 function generateLicenseKey(clientName, isLifetime, durationDays) {
@@ -219,6 +271,31 @@ function authAdmin(req, res, next) {
 //  ROTAS DA API (compatível com C++ client)
 // ============================================================
 
+// ============================================================
+//  Health check endpoint (para monitorar e manter vivo)
+// ============================================================
+app.get('/health', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT COUNT(*) as count FROM license_keys');
+    const keyCount = parseInt(result.rows[0].count);
+    res.json({
+      status: 'ok',
+      db: 'connected',
+      db_connected: dbConnected,
+      total_keys: keyCount,
+      uptime: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: 'error',
+      db: 'disconnected',
+      error: err.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // POST /license/validate
 app.post('/license/validate', async (req, res) => {
   const clientIp = req.ip || req.connection.remoteAddress;
@@ -226,11 +303,11 @@ app.post('/license/validate', async (req, res) => {
   const timestamp = req.headers['x-timestamp'];
   const signature = req.headers['x-signature'];
 
-  console.log(`[API] License validate request - Key: ${license_key ? license_key.substring(0, 8) + '...' : 'null'}`);
+    console.log(`[API] License validate request - Key: ${license_key ? license_key.substring(0, 8) + '...' : 'null'}`);
 
-  if (!license_key) {
-    return res.json({ success: false, message: 'License key is required' });
-  }
+    if (!license_key) {
+      return res.json({ success: false, message: 'License key is required' });
+    }
 
   if (signature && timestamp) {
     const payload = `${app_name || APP_NAME}|${owner_id || OWNER_ID}|${license_key}|${fingerprint || ''}|${timestamp}`;
@@ -241,10 +318,17 @@ app.post('/license/validate', async (req, res) => {
     }
   }
 
-  const { rows } = await pool.query('SELECT * FROM license_keys WHERE key = $1', [license_key]);
-  const keyRow = rows[0];
+    let rows;
+    try {
+      const result = await pool.query('SELECT * FROM license_keys WHERE key = $1', [license_key]);
+      rows = result.rows;
+    } catch (dbErr) {
+      console.error('[DB] Erro na query validate:', dbErr.message);
+      return res.json({ success: false, message: 'Database error, please try again' });
+    }
+    const keyRow = rows[0];
 
-  if (!keyRow) {
+    if (!keyRow) {
     await addLog('validate_fail', `Key not found: ${license_key}`, clientIp);
     return res.json({ success: false, message: 'Key not found' });
   }
@@ -351,13 +435,20 @@ app.post('/license/check', async (req, res) => {
     return res.json({ success: false, message: 'License key required' });
   }
 
-  const { rows } = await pool.query('SELECT * FROM license_keys WHERE key = $1', [license_key]);
-  const keyRow = rows[0];
-  if (!keyRow) {
-    return res.json({ success: false, message: 'Key not found' });
-  }
+    let checkRows;
+    try {
+      const result = await pool.query('SELECT * FROM license_keys WHERE key = $1', [license_key]);
+      checkRows = result.rows;
+    } catch (dbErr) {
+      console.error('[DB] Erro na query check:', dbErr.message);
+      return res.json({ success: false, message: 'Database error, please try again' });
+    }
+    const keyRow = checkRows[0];
+    if (!keyRow) {
+      return res.json({ success: false, message: 'Key not found' });
+    }
 
-  let statusInfo = {
+    let statusInfo = {
     success: true,
     status: keyRow.paused ? 'paused' : keyRow.status,
     is_lifetime: keyRow.is_lifetime ? true : false,
@@ -382,6 +473,7 @@ app.post('/license/check', async (req, res) => {
 
 // POST /admin/login
 app.post('/admin/login', async (req, res) => {
+  try {
   const { username, password } = req.body;
 
   if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
@@ -392,6 +484,10 @@ app.post('/admin/login', async (req, res) => {
 
   await addLog('admin_login_fail', `Failed login attempt: ${username}`, req.ip);
   return res.json({ success: false, message: 'Invalid credentials' });
+  } catch (err) {
+    console.error('[ADMIN] Erro no login:', err.message);
+    return res.json({ success: false, message: 'Server error' });
+  }
 });
 
 // ============================================================
@@ -400,6 +496,7 @@ app.post('/admin/login', async (req, res) => {
 
 // GET /admin/dashboard
 app.get('/admin/dashboard', authAdmin, async (req, res) => {
+  try {
   const totalKeys = (await pool.query('SELECT COUNT(*) as count FROM license_keys')).rows[0].count;
   const activeKeys = (await pool.query("SELECT COUNT(*) as count FROM license_keys WHERE status = 'active' AND paused = 0")).rows[0].count;
   const unusedKeys = (await pool.query("SELECT COUNT(*) as count FROM license_keys WHERE status = 'unused'")).rows[0].count;
@@ -421,6 +518,10 @@ app.get('/admin/dashboard', authAdmin, async (req, res) => {
     },
     recent_logs: recentLogs
   });
+  } catch (err) {
+    console.error('[ADMIN] Erro no dashboard:', err.message);
+    res.json({ success: false, message: 'Database error', stats: { total_keys: 0, active_keys: 0, unused_keys: 0, expired_keys: 0, banned_keys: 0, paused_keys: 0 }, recent_logs: [] });
+  }
 });
 
 // ============================================================
@@ -429,6 +530,7 @@ app.get('/admin/dashboard', authAdmin, async (req, res) => {
 
 // GET /admin/keys - Listar todas as keys
 app.get('/admin/keys', authAdmin, async (req, res) => {
+  try {
   const { status, search, page = 1, limit = 50 } = req.query;
   const offset = (page - 1) * limit;
 
@@ -461,10 +563,15 @@ app.get('/admin/keys', authAdmin, async (req, res) => {
   const total = (await pool.query(countQuery, countParams)).rows[0].count;
 
   res.json({ success: true, keys, total: parseInt(total), page: parseInt(page), limit: parseInt(limit) });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao listar keys:', err.message);
+    res.json({ success: false, message: 'Database error', keys: [], total: 0 });
+  }
 });
 
 // POST /admin/keys - Criar nova key
 app.post('/admin/keys', authAdmin, async (req, res) => {
+  try {
   const { count = 1, duration_type = 'days', duration_days = 30, client_name = '' } = req.body;
   const keys = [];
   const isLifetime = duration_type === 'lifetime' ? 1 : 0;
@@ -482,10 +589,15 @@ app.post('/admin/keys', authAdmin, async (req, res) => {
 
   await addLog('keys_created', `Created ${keys.length} keys (${isLifetime ? 'lifetime' : days + 'd'}, client: ${client_name || 'none'})`, req.ip);
   res.json({ success: true, keys, count: keys.length });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao criar keys:', err.message);
+    res.json({ success: false, message: 'Database error' });
+  }
 });
 
 // PUT /admin/keys/:id - Atualizar key
 app.put('/admin/keys/:id', authAdmin, async (req, res) => {
+  try {
   const { id } = req.params;
   const { status, duration_days, notes, hwid } = req.body;
 
@@ -513,10 +625,15 @@ app.put('/admin/keys/:id', authAdmin, async (req, res) => {
 
   await addLog('key_updated', `Key ${keyRow.key} updated: ${JSON.stringify(req.body)}`, req.ip);
   res.json({ success: true, message: 'Key updated' });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao atualizar key:', err.message);
+    res.json({ success: false, message: 'Database error' });
+  }
 });
 
 // DELETE /admin/keys/:id - Deletar key
 app.delete('/admin/keys/:id', authAdmin, async (req, res) => {
+  try {
   const { id } = req.params;
   const { rows } = await pool.query('SELECT * FROM license_keys WHERE id = $1', [id]);
   const keyRow = rows[0];
@@ -527,20 +644,30 @@ app.delete('/admin/keys/:id', authAdmin, async (req, res) => {
   await pool.query('DELETE FROM license_keys WHERE id = $1', [id]);
   await addLog('key_deleted', `Key ${keyRow.key} deleted`, req.ip);
   res.json({ success: true, message: 'Key deleted' });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao deletar key:', err.message);
+    res.json({ success: false, message: 'Database error' });
+  }
 });
 
 // DELETE /admin/keys - Deletar todas as keys
 app.delete('/admin/keys', authAdmin, async (req, res) => {
+  try {
   const countResult = await pool.query('SELECT COUNT(*) as count FROM license_keys');
   const count = countResult.rows[0].count;
   await pool.query('DELETE FROM license_keys');
   await pool.query('DELETE FROM logs');
   await addLog('keys_deleted_all', `All ${count} keys deleted`, req.ip);
   res.json({ success: true, message: `${count} keys deleted`, count: parseInt(count) });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao deletar todas keys:', err.message);
+    res.json({ success: false, message: 'Database error' });
+  }
 });
 
 // POST /admin/keys/:id/reset-hwid
 app.post('/admin/keys/:id/reset-hwid', authAdmin, async (req, res) => {
+  try {
   const { id } = req.params;
   const { rows } = await pool.query('SELECT * FROM license_keys WHERE id = $1', [id]);
   const keyRow = rows[0];
@@ -551,10 +678,15 @@ app.post('/admin/keys/:id/reset-hwid', authAdmin, async (req, res) => {
   await pool.query('UPDATE license_keys SET hwid = $1 WHERE id = $2', ['', id]);
   await addLog('hwid_reset', `HWID reset for key ${keyRow.key} (dias mantidos)`, req.ip);
   res.json({ success: true, message: 'HWID reset successfully' });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao resetar HWID:', err.message);
+    res.json({ success: false, message: 'Database error' });
+  }
 });
 
 // POST /admin/keys/:id/pause
 app.post('/admin/keys/:id/pause', authAdmin, async (req, res) => {
+  try {
   const { id } = req.params;
   const { rows } = await pool.query('SELECT * FROM license_keys WHERE id = $1', [id]);
   const keyRow = rows[0];
@@ -587,10 +719,15 @@ app.post('/admin/keys/:id/pause', authAdmin, async (req, res) => {
     await addLog('key_paused', `Key ${keyRow.key} paused`, req.ip);
     res.json({ success: true, message: 'Key paused', action: 'paused' });
   }
+  } catch (err) {
+    console.error('[ADMIN] Erro ao pausar/despausar key:', err.message);
+    res.json({ success: false, message: 'Database error' });
+  }
 });
 
 // POST /admin/keys/pause-all
 app.post('/admin/keys/pause-all', authAdmin, async (req, res) => {
+  try {
   const pausedCount = (await pool.query("SELECT COUNT(*) as count FROM license_keys WHERE paused = 1")).rows[0].count;
   const activeCount = (await pool.query("SELECT COUNT(*) as count FROM license_keys WHERE status = 'active' AND paused = 0")).rows[0].count;
 
@@ -627,10 +764,15 @@ app.post('/admin/keys/pause-all', authAdmin, async (req, res) => {
     await addLog('keys_paused_all', `All ${activeKeys.length} active keys paused`, req.ip);
     res.json({ success: true, message: `${activeKeys.length} keys paused`, action: 'paused' });
   }
+  } catch (err) {
+    console.error('[ADMIN] Erro ao pausar/despausar todas keys:', err.message);
+    res.json({ success: false, message: 'Database error' });
+  }
 });
 
 // POST /admin/keys/:id/extend
 app.post('/admin/keys/:id/extend', authAdmin, async (req, res) => {
+  try {
   const { id } = req.params;
   const { days = 30 } = req.body;
 
@@ -658,12 +800,17 @@ app.post('/admin/keys/:id/extend', authAdmin, async (req, res) => {
   await pool.query('UPDATE license_keys SET expires_at = $1, status = $2 WHERE id = $3', [newExpiry, 'active', id]);
   await addLog('key_extended', `Key ${keyRow.key} extended by ${days} days`, req.ip);
   res.json({ success: true, message: `Extended by ${days} days`, expires_at: newExpiry });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao estender key:', err.message);
+    res.json({ success: false, message: 'Database error' });
+  }
 });
 
 // ============================================================
 //  ROTAS ADMIN - Logs
 // ============================================================
 app.get('/admin/logs', authAdmin, async (req, res) => {
+  try {
   const { page = 1, limit = 100, action } = req.query;
   const offset = (page - 1) * limit;
 
@@ -688,13 +835,22 @@ app.get('/admin/logs', authAdmin, async (req, res) => {
   const total = (await pool.query(countQuery, countParams)).rows[0].count;
 
   res.json({ success: true, logs, total: parseInt(total), page: parseInt(page), limit: parseInt(limit) });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao listar logs:', err.message);
+    res.json({ success: false, message: 'Database error', logs: [], total: 0 });
+  }
 });
 
 // DELETE /admin/logs
 app.delete('/admin/logs', authAdmin, async (req, res) => {
-  await pool.query('DELETE FROM logs');
-  await addLog('logs_cleared', 'All logs cleared', req.ip);
-  res.json({ success: true, message: 'Logs cleared' });
+  try {
+    await pool.query('DELETE FROM logs');
+    await addLog('logs_cleared', 'All logs cleared', req.ip);
+    res.json({ success: true, message: 'Logs cleared' });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao limpar logs:', err.message);
+    res.json({ success: false, message: 'Database error' });
+  }
 });
 
 // ============================================================
@@ -726,15 +882,17 @@ process.on('SIGTERM', async () => {
 //  Iniciar servidor
 // ============================================================
 initDatabase().then(() => {
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n╔══════════════════════════════════════════════╗`);
-    console.log(`║     PEDRIN XITS - Auth Panel v3.0           ║`);
+    console.log(`║     PEDRIN XITS - Auth Panel v3.1           ║`);
     console.log(`╠══════════════════════════════════════════════╣`);
     console.log(`║  Server:  http://localhost:${PORT}              ║`);
     console.log(`║  Panel:   http://localhost:${PORT}/admin         ║`);
     console.log(`║  API:     http://localhost:${PORT}/license       ║`);
+    console.log(`║  Health:  http://localhost:${PORT}/health        ║`);
     console.log(`║                                              ║`);
-    console.log(`║  DB:     PostgreSQL (persistente)            ║`);
+    console.log(`║  DB:     PostgreSQL (Neon - persistente)     ║`);
+    console.log(`║  Keep-Alive: 2 min (Neon anti-suspend)       ║`);
     console.log(`║  Admin:   ${ADMIN_USERNAME} / ${ADMIN_PASSWORD}               ║`);
     console.log(`╚══════════════════════════════════════════════╝\n`);
   });
