@@ -1,24 +1,22 @@
 const express = require('express');
-const initSqlJs = require('sql.js');
+const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const cors = require('cors');
 const path = require('path');
-const fs = require('fs');
 
 // ============================================================
 //  Configuração
 // ============================================================
 const PORT = process.env.PORT || 3000;
-const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || '';
-const JWT_SECRET = crypto.randomBytes(32).toString('hex');
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 const APP_NAME = "Pedrin Xits";
 const OWNER_ID = "3616b50c-8ff3-4629-a89b-11c53f3f3643";
 const APP_SECRET = "1facb137182890f342db9067b80c779107c29fb1ff3d595934b6bdb01f51fa1d";
-const ADMIN_USERNAME = "1";
-const ADMIN_PASSWORD = "1";
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "1";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "1";
 
 const app = express();
 app.use(cors({
@@ -29,176 +27,114 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ============================================================
-//  Database Wrapper (sql.js compatibility layer)
+//  Database - PostgreSQL
 // ============================================================
-const DB_PATH = path.join(__dirname, 'database.db');
-let db;
-
-function saveDatabase() {
-  if (db) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(DB_PATH, buffer);
-  }
-}
-
-// Salvar a cada 30 segundos
-setInterval(saveDatabase, 30000);
-
-// Wrapper para preparar statements com API similar ao better-sqlite3
-class StmtWrapper {
-  constructor(database, sql) {
-    this.db = database;
-    this.sql = sql;
-  }
-
-  get(...params) {
-    try {
-      const stmt = this.db.prepare(this.sql);
-      if (params.length > 0) stmt.bind(params);
-      if (stmt.step()) {
-        const result = stmt.getAsObject();
-        stmt.free();
-        return result;
-      }
-      stmt.free();
-      return undefined;
-    } catch (e) {
-      console.error('[DB] get error:', e.message, 'SQL:', this.sql);
-      return undefined;
-    }
-  }
-
-  all(...params) {
-    try {
-      const results = [];
-      const stmt = this.db.prepare(this.sql);
-      if (params.length > 0) stmt.bind(params);
-      while (stmt.step()) {
-        results.push(stmt.getAsObject());
-      }
-      stmt.free();
-      return results;
-    } catch (e) {
-      console.error('[DB] all error:', e.message, 'SQL:', this.sql);
-      return [];
-    }
-  }
-
-  run(...params) {
-    try {
-      this.db.run(this.sql, params);
-      return { changes: this.db.getRowsModified() };
-    } catch (e) {
-      console.error('[DB] run error:', e.message, 'SQL:', this.sql);
-      return { changes: 0 };
-    }
-  }
-}
-
-function dbPrepare(sql) {
-  return new StmtWrapper(db, sql);
-}
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
 
 // ============================================================
 //  Inicializar Database
 // ============================================================
 async function initDatabase() {
-  const SQL = await initSqlJs();
+  const client = await pool.connect();
+  try {
+    // Tabelas
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    `);
 
-  // Carregar banco existente ou criar novo
-  if (fs.existsSync(DB_PATH)) {
-    const fileBuffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(fileBuffer);
-  } else {
-    db = new SQL.Database();
-  }
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        email TEXT,
+        hwid TEXT DEFAULT '',
+        ip_address TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now')),
+        last_login TEXT,
+        banned INTEGER DEFAULT 0,
+        ban_reason TEXT DEFAULT '',
+        notes TEXT DEFAULT ''
+      )
+    `);
 
-  // Tabelas
-  db.run(`
-    CREATE TABLE IF NOT EXISTS app_settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    )
-  `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS license_keys (
+        id TEXT PRIMARY KEY,
+        key TEXT UNIQUE NOT NULL,
+        user_id TEXT,
+        status TEXT DEFAULT 'unused',
+        duration_days INTEGER DEFAULT 30,
+        is_lifetime INTEGER DEFAULT 0,
+        client_name TEXT DEFAULT '',
+        created_at TEXT DEFAULT (now()::text),
+        activated_at TEXT,
+        expires_at TEXT,
+        hwid TEXT DEFAULT '',
+        max_uses INTEGER DEFAULT 1,
+        current_uses INTEGER DEFAULT 0,
+        notes TEXT DEFAULT '',
+        created_by TEXT DEFAULT 'admin',
+        paused INTEGER DEFAULT 0,
+        paused_at TEXT,
+        total_paused_ms INTEGER DEFAULT 0
+      )
+    `);
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      username TEXT UNIQUE NOT NULL,
-      email TEXT,
-      hwid TEXT DEFAULT '',
-      ip_address TEXT DEFAULT '',
-      created_at TEXT DEFAULT (datetime('now')),
-      last_login TEXT,
-      banned INTEGER DEFAULT 0,
-      ban_reason TEXT DEFAULT '',
-      notes TEXT DEFAULT ''
-    )
-  `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS logs (
+        id SERIAL PRIMARY KEY,
+        action TEXT NOT NULL,
+        details TEXT,
+        ip_address TEXT,
+        created_at TEXT DEFAULT (now()::text)
+      )
+    `);
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS license_keys (
-      id TEXT PRIMARY KEY,
-      key TEXT UNIQUE NOT NULL,
-      user_id TEXT,
-      status TEXT DEFAULT 'unused',
-      duration_days INTEGER DEFAULT 30,
-      is_lifetime INTEGER DEFAULT 0,
-      client_name TEXT DEFAULT '',
-      created_at TEXT DEFAULT (datetime('now')),
-      activated_at TEXT,
-      expires_at TEXT,
-      hwid TEXT DEFAULT '',
-      max_uses INTEGER DEFAULT 1,
-      current_uses INTEGER DEFAULT 0,
-      notes TEXT DEFAULT '',
-      created_by TEXT DEFAULT 'admin',
-      paused INTEGER DEFAULT 0,
-      paused_at TEXT,
-      total_paused_ms INTEGER DEFAULT 0
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      action TEXT NOT NULL,
-      details TEXT,
-      ip_address TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    )
-  `);
-
-  // Migrar: adicionar colunas que podem não existir
-  function addColumnIfNotExists(table, column, definition) {
-    try {
-      db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-    } catch (e) {
-      // Coluna já existe, ignorar
+    // Migrar: adicionar colunas que podem não existir
+    async function addColumnIfNotExists(table, column, definition) {
+      try {
+        await client.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+      } catch (e) {
+        // Coluna já existe, ignorar
+      }
     }
+    await addColumnIfNotExists('license_keys', 'is_lifetime', 'INTEGER DEFAULT 0');
+    await addColumnIfNotExists('license_keys', 'client_name', "TEXT DEFAULT ''");
+    await addColumnIfNotExists('license_keys', 'paused', 'INTEGER DEFAULT 0');
+    await addColumnIfNotExists('license_keys', 'paused_at', 'TEXT');
+    await addColumnIfNotExists('license_keys', 'total_paused_ms', 'INTEGER DEFAULT 0');
+
+    // Inserir configurações padrão se não existirem
+    await client.query(
+      'INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
+      ['app_name', APP_NAME]
+    );
+    await client.query(
+      'INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
+      ['owner_id', OWNER_ID]
+    );
+    await client.query(
+      'INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
+      ['app_secret', APP_SECRET]
+    );
+
+    console.log('[DB] PostgreSQL Database initialized successfully');
+  } finally {
+    client.release();
   }
-  addColumnIfNotExists('license_keys', 'is_lifetime', 'INTEGER DEFAULT 0');
-  addColumnIfNotExists('license_keys', 'client_name', "TEXT DEFAULT ''");
-  addColumnIfNotExists('license_keys', 'paused', 'INTEGER DEFAULT 0');
-  addColumnIfNotExists('license_keys', 'paused_at', 'TEXT');
-  addColumnIfNotExists('license_keys', 'total_paused_ms', 'INTEGER DEFAULT 0');
-
-  // Inserir configurações padrão se não existirem
-  const insertSetting = dbPrepare('INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)');
-  insertSetting.run('app_name', APP_NAME);
-  insertSetting.run('owner_id', OWNER_ID);
-  insertSetting.run('app_secret', APP_SECRET);
-
-  saveDatabase();
-  console.log('[DB] Database initialized successfully');
 }
 
 // ============================================================
 //  Funções Auxiliares
 // ============================================================
-function addLog(action, details, ip) {
-  dbPrepare('INSERT INTO logs (action, details, ip_address) VALUES (?, ?, ?)').run(action, details || '', ip || '');
+async function addLog(action, details, ip) {
+  await pool.query('INSERT INTO logs (action, details, ip_address) VALUES ($1, $2, $3)', [action, details || '', ip || '']);
 }
 
 function generateLicenseKey(clientName, isLifetime, durationDays) {
@@ -284,7 +220,7 @@ function authAdmin(req, res, next) {
 // ============================================================
 
 // POST /license/validate
-app.post('/license/validate', (req, res) => {
+app.post('/license/validate', async (req, res) => {
   const clientIp = req.ip || req.connection.remoteAddress;
   const { license_key, fingerprint, app_name, owner_id } = req.body;
   const timestamp = req.headers['x-timestamp'];
@@ -301,24 +237,25 @@ app.post('/license/validate', (req, res) => {
     const valid = verifyHmac(signature, timestamp, payload);
     if (!valid) {
       console.log('[API] HMAC verification failed');
-      addLog('hmac_fail', `Key: ${license_key}`, clientIp);
+      await addLog('hmac_fail', `Key: ${license_key}`, clientIp);
     }
   }
 
-  const keyRow = dbPrepare('SELECT * FROM license_keys WHERE key = ?').get(license_key);
+  const { rows } = await pool.query('SELECT * FROM license_keys WHERE key = $1', [license_key]);
+  const keyRow = rows[0];
 
   if (!keyRow) {
-    addLog('validate_fail', `Key not found: ${license_key}`, clientIp);
+    await addLog('validate_fail', `Key not found: ${license_key}`, clientIp);
     return res.json({ success: false, message: 'Key not found' });
   }
 
   if (keyRow.status === 'banned') {
-    addLog('validate_banned', `Key: ${license_key}`, clientIp);
+    await addLog('validate_banned', `Key: ${license_key}`, clientIp);
     return res.json({ success: false, message: 'Key is banned' });
   }
 
   if (keyRow.paused) {
-    addLog('validate_paused', `Key: ${license_key}`, clientIp);
+    await addLog('validate_paused', `Key: ${license_key}`, clientIp);
     return res.json({ success: false, message: 'Key is paused' });
   }
 
@@ -329,17 +266,17 @@ app.post('/license/validate', (req, res) => {
       expiresAt = getExpiryDate(now, keyRow.duration_days);
     }
 
-    dbPrepare(`
+    await pool.query(`
       UPDATE license_keys SET 
         status = 'active', 
-        activated_at = ?, 
-        expires_at = ?, 
-        hwid = ?,
+        activated_at = $1, 
+        expires_at = $2, 
+        hwid = $3,
         current_uses = 1
-      WHERE id = ?
-    `).run(now, expiresAt, fingerprint || '', keyRow.id);
+      WHERE id = $4
+    `, [now, expiresAt, fingerprint || '', keyRow.id]);
 
-    addLog('key_activated', `Key: ${license_key}, HWID: ${fingerprint}`, clientIp);
+    await addLog('key_activated', `Key: ${license_key}, HWID: ${fingerprint}`, clientIp);
 
     const response = {
       success: true,
@@ -363,24 +300,24 @@ app.post('/license/validate', (req, res) => {
       const now = new Date();
       const exp = new Date(keyRow.expires_at);
       if (now > exp) {
-        dbPrepare("UPDATE license_keys SET status = 'expired' WHERE id = ?").run(keyRow.id);
-        addLog('key_expired', `Key: ${license_key}`, clientIp);
+        await pool.query("UPDATE license_keys SET status = 'expired' WHERE id = $1", [keyRow.id]);
+        await addLog('key_expired', `Key: ${license_key}`, clientIp);
         return res.json({ success: false, message: 'License has expired' });
       }
     }
 
     if (keyRow.hwid && fingerprint && keyRow.hwid !== fingerprint) {
-      addLog('hwid_mismatch', `Key: ${license_key}, Expected: ${keyRow.hwid}, Got: ${fingerprint}`, clientIp);
+      await addLog('hwid_mismatch', `Key: ${license_key}, Expected: ${keyRow.hwid}, Got: ${fingerprint}`, clientIp);
       return res.json({ success: false, message: 'HWID mismatch. Reset required.' });
     }
 
     if (!keyRow.hwid && fingerprint) {
-      dbPrepare('UPDATE license_keys SET hwid = ? WHERE id = ?').run(fingerprint, keyRow.id);
+      await pool.query('UPDATE license_keys SET hwid = $1 WHERE id = $2', [fingerprint, keyRow.id]);
     }
 
-    dbPrepare('UPDATE license_keys SET current_uses = current_uses + 1 WHERE id = ?').run(keyRow.id);
+    await pool.query('UPDATE license_keys SET current_uses = current_uses + 1 WHERE id = $1', [keyRow.id]);
 
-    addLog('validate_ok', `Key: ${license_key}`, clientIp);
+    await addLog('validate_ok', `Key: ${license_key}`, clientIp);
 
     const response2 = {
       success: true,
@@ -400,7 +337,7 @@ app.post('/license/validate', (req, res) => {
   }
 
   if (keyRow.status === 'expired') {
-    addLog('validate_expired', `Key: ${license_key}`, clientIp);
+    await addLog('validate_expired', `Key: ${license_key}`, clientIp);
     return res.json({ success: false, message: 'License has expired' });
   }
 
@@ -408,13 +345,14 @@ app.post('/license/validate', (req, res) => {
 });
 
 // POST /license/check
-app.post('/license/check', (req, res) => {
+app.post('/license/check', async (req, res) => {
   const { license_key } = req.body;
   if (!license_key) {
     return res.json({ success: false, message: 'License key required' });
   }
 
-  const keyRow = dbPrepare('SELECT * FROM license_keys WHERE key = ?').get(license_key);
+  const { rows } = await pool.query('SELECT * FROM license_keys WHERE key = $1', [license_key]);
+  const keyRow = rows[0];
   if (!keyRow) {
     return res.json({ success: false, message: 'Key not found' });
   }
@@ -443,16 +381,16 @@ app.post('/license/check', (req, res) => {
 // ============================================================
 
 // POST /admin/login
-app.post('/admin/login', (req, res) => {
+app.post('/admin/login', async (req, res) => {
   const { username, password } = req.body;
 
   if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
     const token = jwt.sign({ username, role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
-    addLog('admin_login', `Admin logged in`, req.ip);
+    await addLog('admin_login', `Admin logged in`, req.ip);
     return res.json({ success: true, token });
   }
 
-  addLog('admin_login_fail', `Failed login attempt: ${username}`, req.ip);
+  await addLog('admin_login_fail', `Failed login attempt: ${username}`, req.ip);
   return res.json({ success: false, message: 'Invalid credentials' });
 });
 
@@ -461,25 +399,25 @@ app.post('/admin/login', (req, res) => {
 // ============================================================
 
 // GET /admin/dashboard
-app.get('/admin/dashboard', authAdmin, (req, res) => {
-  const totalKeys = dbPrepare('SELECT COUNT(*) as count FROM license_keys').get().count;
-  const activeKeys = dbPrepare("SELECT COUNT(*) as count FROM license_keys WHERE status = 'active' AND paused = 0").get().count;
-  const unusedKeys = dbPrepare("SELECT COUNT(*) as count FROM license_keys WHERE status = 'unused'").get().count;
-  const expiredKeys = dbPrepare("SELECT COUNT(*) as count FROM license_keys WHERE status = 'expired'").get().count;
-  const bannedKeys = dbPrepare("SELECT COUNT(*) as count FROM license_keys WHERE status = 'banned'").get().count;
-  const pausedKeys = dbPrepare("SELECT COUNT(*) as count FROM license_keys WHERE paused = 1").get().count;
+app.get('/admin/dashboard', authAdmin, async (req, res) => {
+  const totalKeys = (await pool.query('SELECT COUNT(*) as count FROM license_keys')).rows[0].count;
+  const activeKeys = (await pool.query("SELECT COUNT(*) as count FROM license_keys WHERE status = 'active' AND paused = 0")).rows[0].count;
+  const unusedKeys = (await pool.query("SELECT COUNT(*) as count FROM license_keys WHERE status = 'unused'")).rows[0].count;
+  const expiredKeys = (await pool.query("SELECT COUNT(*) as count FROM license_keys WHERE status = 'expired'")).rows[0].count;
+  const bannedKeys = (await pool.query("SELECT COUNT(*) as count FROM license_keys WHERE status = 'banned'")).rows[0].count;
+  const pausedKeys = (await pool.query("SELECT COUNT(*) as count FROM license_keys WHERE paused = 1")).rows[0].count;
 
-  const recentLogs = dbPrepare('SELECT * FROM logs ORDER BY id DESC LIMIT 50').all();
+  const recentLogs = (await pool.query('SELECT * FROM logs ORDER BY id DESC LIMIT 50')).rows;
 
   res.json({
     success: true,
     stats: {
-      total_keys: totalKeys,
-      active_keys: activeKeys,
-      unused_keys: unusedKeys,
-      expired_keys: expiredKeys,
-      banned_keys: bannedKeys,
-      paused_keys: pausedKeys
+      total_keys: parseInt(totalKeys),
+      active_keys: parseInt(activeKeys),
+      unused_keys: parseInt(unusedKeys),
+      expired_keys: parseInt(expiredKeys),
+      banned_keys: parseInt(bannedKeys),
+      paused_keys: parseInt(pausedKeys)
     },
     recent_logs: recentLogs
   });
@@ -490,7 +428,7 @@ app.get('/admin/dashboard', authAdmin, (req, res) => {
 // ============================================================
 
 // GET /admin/keys - Listar todas as keys
-app.get('/admin/keys', authAdmin, (req, res) => {
+app.get('/admin/keys', authAdmin, async (req, res) => {
   const { status, search, page = 1, limit = 50 } = req.query;
   const offset = (page - 1) * limit;
 
@@ -498,31 +436,35 @@ app.get('/admin/keys', authAdmin, (req, res) => {
   let countQuery = 'SELECT COUNT(*) as count FROM license_keys WHERE 1=1';
   const params = [];
   const countParams = [];
+  let paramIndex = 1;
+  let countParamIndex = 1;
 
   if (status) {
-    query += ' AND status = ?';
-    countQuery += ' AND status = ?';
+    query += ` AND status = $${paramIndex++}`;
+    countQuery += ` AND status = $${countParamIndex++}`;
     params.push(status);
     countParams.push(status);
   }
   if (search) {
-    query += ' AND (key LIKE ? OR notes LIKE ? OR client_name LIKE ?)';
-    countQuery += ' AND (key LIKE ? OR notes LIKE ? OR client_name LIKE ?)';
+    query += ` AND (key LIKE $${paramIndex} OR notes LIKE $${paramIndex + 1} OR client_name LIKE $${paramIndex + 2})`;
+    countQuery += ` AND (key LIKE $${countParamIndex} OR notes LIKE $${countParamIndex + 1} OR client_name LIKE $${countParamIndex + 2})`;
     params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     countParams.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    paramIndex += 3;
+    countParamIndex += 3;
   }
 
-  query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+  query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
   params.push(parseInt(limit), parseInt(offset));
 
-  const keys = dbPrepare(query).all(...params);
-  const total = dbPrepare(countQuery).get(...countParams).count;
+  const keys = (await pool.query(query, params)).rows;
+  const total = (await pool.query(countQuery, countParams)).rows[0].count;
 
-  res.json({ success: true, keys, total, page: parseInt(page), limit: parseInt(limit) });
+  res.json({ success: true, keys, total: parseInt(total), page: parseInt(page), limit: parseInt(limit) });
 });
 
 // POST /admin/keys - Criar nova key
-app.post('/admin/keys', authAdmin, (req, res) => {
+app.post('/admin/keys', authAdmin, async (req, res) => {
   const { count = 1, duration_type = 'days', duration_days = 30, client_name = '' } = req.body;
   const keys = [];
   const isLifetime = duration_type === 'lifetime' ? 1 : 0;
@@ -531,76 +473,91 @@ app.post('/admin/keys', authAdmin, (req, res) => {
   for (let i = 0; i < Math.min(count, 100); i++) {
     const id = uuidv4();
     const key = generateLicenseKey(client_name, isLifetime, days);
-    dbPrepare(`
+    await pool.query(`
       INSERT INTO license_keys (id, key, status, duration_days, is_lifetime, client_name, notes, created_by)
-      VALUES (?, ?, 'unused', ?, ?, ?, '', 'admin')
-    `).run(id, key, days, isLifetime, client_name || '');
+      VALUES ($1, $2, 'unused', $3, $4, $5, '', 'admin')
+    `, [id, key, days, isLifetime, client_name || '']);
     keys.push(key);
   }
 
-  addLog('keys_created', `Created ${keys.length} keys (${isLifetime ? 'lifetime' : days + 'd'}, client: ${client_name || 'none'})`, req.ip);
+  await addLog('keys_created', `Created ${keys.length} keys (${isLifetime ? 'lifetime' : days + 'd'}, client: ${client_name || 'none'})`, req.ip);
   res.json({ success: true, keys, count: keys.length });
 });
 
 // PUT /admin/keys/:id - Atualizar key
-app.put('/admin/keys/:id', authAdmin, (req, res) => {
+app.put('/admin/keys/:id', authAdmin, async (req, res) => {
   const { id } = req.params;
   const { status, duration_days, notes, hwid } = req.body;
 
-  const keyRow = dbPrepare('SELECT * FROM license_keys WHERE id = ?').get(id);
+  const { rows } = await pool.query('SELECT * FROM license_keys WHERE id = $1', [id]);
+  const keyRow = rows[0];
   if (!keyRow) {
     return res.json({ success: false, message: 'Key not found' });
   }
 
   const updates = [];
   const params = [];
+  let paramIndex = 1;
 
-  if (status !== undefined) { updates.push('status = ?'); params.push(status); }
-  if (duration_days !== undefined) { updates.push('duration_days = ?'); params.push(duration_days); }
-  if (notes !== undefined) { updates.push('notes = ?'); params.push(notes); }
-  if (hwid !== undefined) { updates.push('hwid = ?'); params.push(hwid); }
+  if (status !== undefined) { updates.push(`status = $${paramIndex++}`); params.push(status); }
+  if (duration_days !== undefined) { updates.push(`duration_days = $${paramIndex++}`); params.push(duration_days); }
+  if (notes !== undefined) { updates.push(`notes = $${paramIndex++}`); params.push(notes); }
+  if (hwid !== undefined) { updates.push(`hwid = $${paramIndex++}`); params.push(hwid); }
 
   if (updates.length === 0) {
     return res.json({ success: false, message: 'No fields to update' });
   }
 
   params.push(id);
-  dbPrepare(`UPDATE license_keys SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  await pool.query(`UPDATE license_keys SET ${updates.join(', ')} WHERE id = $${paramIndex}`, params);
 
-  addLog('key_updated', `Key ${keyRow.key} updated: ${JSON.stringify(req.body)}`, req.ip);
+  await addLog('key_updated', `Key ${keyRow.key} updated: ${JSON.stringify(req.body)}`, req.ip);
   res.json({ success: true, message: 'Key updated' });
 });
 
 // DELETE /admin/keys/:id - Deletar key
-app.delete('/admin/keys/:id', authAdmin, (req, res) => {
+app.delete('/admin/keys/:id', authAdmin, async (req, res) => {
   const { id } = req.params;
-  const keyRow = dbPrepare('SELECT * FROM license_keys WHERE id = ?').get(id);
+  const { rows } = await pool.query('SELECT * FROM license_keys WHERE id = $1', [id]);
+  const keyRow = rows[0];
   if (!keyRow) {
     return res.json({ success: false, message: 'Key not found' });
   }
 
-  dbPrepare('DELETE FROM license_keys WHERE id = ?').run(id);
-  addLog('key_deleted', `Key ${keyRow.key} deleted`, req.ip);
+  await pool.query('DELETE FROM license_keys WHERE id = $1', [id]);
+  await addLog('key_deleted', `Key ${keyRow.key} deleted`, req.ip);
   res.json({ success: true, message: 'Key deleted' });
 });
 
+// DELETE /admin/keys - Deletar todas as keys
+app.delete('/admin/keys', authAdmin, async (req, res) => {
+  const countResult = await pool.query('SELECT COUNT(*) as count FROM license_keys');
+  const count = countResult.rows[0].count;
+  await pool.query('DELETE FROM license_keys');
+  await pool.query('DELETE FROM logs');
+  await addLog('keys_deleted_all', `All ${count} keys deleted`, req.ip);
+  res.json({ success: true, message: `${count} keys deleted`, count: parseInt(count) });
+});
+
 // POST /admin/keys/:id/reset-hwid
-app.post('/admin/keys/:id/reset-hwid', authAdmin, (req, res) => {
+app.post('/admin/keys/:id/reset-hwid', authAdmin, async (req, res) => {
   const { id } = req.params;
-  const keyRow = dbPrepare('SELECT * FROM license_keys WHERE id = ?').get(id);
+  const { rows } = await pool.query('SELECT * FROM license_keys WHERE id = $1', [id]);
+  const keyRow = rows[0];
   if (!keyRow) {
     return res.json({ success: false, message: 'Key not found' });
   }
 
-  dbPrepare('UPDATE license_keys SET hwid = ? WHERE id = ?').run('', id);
-  addLog('hwid_reset', `HWID reset for key ${keyRow.key} (dias mantidos)`, req.ip);
+  await pool.query('UPDATE license_keys SET hwid = $1 WHERE id = $2', ['', id]);
+  await addLog('hwid_reset', `HWID reset for key ${keyRow.key} (dias mantidos)`, req.ip);
   res.json({ success: true, message: 'HWID reset successfully' });
 });
 
 // POST /admin/keys/:id/pause
-app.post('/admin/keys/:id/pause', authAdmin, (req, res) => {
+app.post('/admin/keys/:id/pause', authAdmin, async (req, res) => {
   const { id } = req.params;
-  const keyRow = dbPrepare('SELECT * FROM license_keys WHERE id = ?').get(id);
+  const { rows } = await pool.query('SELECT * FROM license_keys WHERE id = $1', [id]);
+  const keyRow = rows[0];
   if (!keyRow) {
     return res.json({ success: false, message: 'Key not found' });
   }
@@ -618,27 +575,27 @@ app.post('/admin/keys/:id/pause', authAdmin, (req, res) => {
       newExpiresAt = currentExpiry.toISOString().split('.')[0] + 'Z';
     }
 
-    dbPrepare('UPDATE license_keys SET paused = 0, paused_at = NULL, total_paused_ms = ?, expires_at = ? WHERE id = ?')
-      .run(newTotalPaused, newExpiresAt, id);
+    await pool.query('UPDATE license_keys SET paused = 0, paused_at = NULL, total_paused_ms = $1, expires_at = $2 WHERE id = $3',
+      [newTotalPaused, newExpiresAt, id]);
 
-    addLog('key_unpaused', `Key ${keyRow.key} unpaused`, req.ip);
+    await addLog('key_unpaused', `Key ${keyRow.key} unpaused`, req.ip);
     res.json({ success: true, message: 'Key unpaused', action: 'unpaused' });
   } else {
     const now = new Date().toISOString().split('.')[0] + 'Z';
-    dbPrepare('UPDATE license_keys SET paused = 1, paused_at = ? WHERE id = ?').run(now, id);
+    await pool.query('UPDATE license_keys SET paused = 1, paused_at = $1 WHERE id = $2', [now, id]);
 
-    addLog('key_paused', `Key ${keyRow.key} paused`, req.ip);
+    await addLog('key_paused', `Key ${keyRow.key} paused`, req.ip);
     res.json({ success: true, message: 'Key paused', action: 'paused' });
   }
 });
 
 // POST /admin/keys/pause-all
-app.post('/admin/keys/pause-all', authAdmin, (req, res) => {
-  const pausedCount = dbPrepare("SELECT COUNT(*) as count FROM license_keys WHERE paused = 1").get().count;
-  const activeCount = dbPrepare("SELECT COUNT(*) as count FROM license_keys WHERE status = 'active' AND paused = 0").get().count;
+app.post('/admin/keys/pause-all', authAdmin, async (req, res) => {
+  const pausedCount = (await pool.query("SELECT COUNT(*) as count FROM license_keys WHERE paused = 1")).rows[0].count;
+  const activeCount = (await pool.query("SELECT COUNT(*) as count FROM license_keys WHERE status = 'active' AND paused = 0")).rows[0].count;
 
-  if (pausedCount > 0 && activeCount === 0) {
-    const pausedKeys = dbPrepare("SELECT * FROM license_keys WHERE paused = 1").all();
+  if (parseInt(pausedCount) > 0 && parseInt(activeCount) === 0) {
+    const pausedKeys = (await pool.query("SELECT * FROM license_keys WHERE paused = 1")).rows;
     const now = new Date();
 
     for (const key of pausedKeys) {
@@ -653,31 +610,32 @@ app.post('/admin/keys/pause-all', authAdmin, (req, res) => {
         newExpiresAt = currentExpiry.toISOString().split('.')[0] + 'Z';
       }
 
-      dbPrepare('UPDATE license_keys SET paused = 0, paused_at = NULL, total_paused_ms = ?, expires_at = ? WHERE id = ?')
-        .run(newTotalPaused, newExpiresAt, key.id);
+      await pool.query('UPDATE license_keys SET paused = 0, paused_at = NULL, total_paused_ms = $1, expires_at = $2 WHERE id = $3',
+        [newTotalPaused, newExpiresAt, key.id]);
     }
 
-    addLog('keys_unpaused_all', `All ${pausedKeys.length} keys unpaused`, req.ip);
+    await addLog('keys_unpaused_all', `All ${pausedKeys.length} keys unpaused`, req.ip);
     res.json({ success: true, message: `${pausedKeys.length} keys unpaused`, action: 'unpaused' });
   } else {
-    const activeKeys = dbPrepare("SELECT * FROM license_keys WHERE status = 'active' AND paused = 0").all();
+    const activeKeys = (await pool.query("SELECT * FROM license_keys WHERE status = 'active' AND paused = 0")).rows;
     const now = new Date().toISOString().split('.')[0] + 'Z';
 
     for (const key of activeKeys) {
-      dbPrepare('UPDATE license_keys SET paused = 1, paused_at = ? WHERE id = ?').run(now, key.id);
+      await pool.query('UPDATE license_keys SET paused = 1, paused_at = $1 WHERE id = $2', [now, key.id]);
     }
 
-    addLog('keys_paused_all', `All ${activeKeys.length} active keys paused`, req.ip);
+    await addLog('keys_paused_all', `All ${activeKeys.length} active keys paused`, req.ip);
     res.json({ success: true, message: `${activeKeys.length} keys paused`, action: 'paused' });
   }
 });
 
 // POST /admin/keys/:id/extend
-app.post('/admin/keys/:id/extend', authAdmin, (req, res) => {
+app.post('/admin/keys/:id/extend', authAdmin, async (req, res) => {
   const { id } = req.params;
   const { days = 30 } = req.body;
 
-  const keyRow = dbPrepare('SELECT * FROM license_keys WHERE id = ?').get(id);
+  const { rows } = await pool.query('SELECT * FROM license_keys WHERE id = $1', [id]);
+  const keyRow = rows[0];
   if (!keyRow) {
     return res.json({ success: false, message: 'Key not found' });
   }
@@ -697,15 +655,15 @@ app.post('/admin/keys/:id/extend', authAdmin, (req, res) => {
     newExpiry = now.toISOString().split('.')[0] + 'Z';
   }
 
-  dbPrepare('UPDATE license_keys SET expires_at = ?, status = ? WHERE id = ?').run(newExpiry, 'active', id);
-  addLog('key_extended', `Key ${keyRow.key} extended by ${days} days`, req.ip);
+  await pool.query('UPDATE license_keys SET expires_at = $1, status = $2 WHERE id = $3', [newExpiry, 'active', id]);
+  await addLog('key_extended', `Key ${keyRow.key} extended by ${days} days`, req.ip);
   res.json({ success: true, message: `Extended by ${days} days`, expires_at: newExpiry });
 });
 
 // ============================================================
 //  ROTAS ADMIN - Logs
 // ============================================================
-app.get('/admin/logs', authAdmin, (req, res) => {
+app.get('/admin/logs', authAdmin, async (req, res) => {
   const { page = 1, limit = 100, action } = req.query;
   const offset = (page - 1) * limit;
 
@@ -713,27 +671,29 @@ app.get('/admin/logs', authAdmin, (req, res) => {
   let countQuery = 'SELECT COUNT(*) as count FROM logs WHERE 1=1';
   const params = [];
   const countParams = [];
+  let paramIndex = 1;
+  let countParamIndex = 1;
 
   if (action) {
-    query += ' AND action LIKE ?';
-    countQuery += ' AND action LIKE ?';
+    query += ` AND action LIKE $${paramIndex++}`;
+    countQuery += ` AND action LIKE $${countParamIndex++}`;
     params.push(`%${action}%`);
     countParams.push(`%${action}%`);
   }
 
-  query += ' ORDER BY id DESC LIMIT ? OFFSET ?';
+  query += ` ORDER BY id DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
   params.push(parseInt(limit), parseInt(offset));
 
-  const logs = dbPrepare(query).all(...params);
-  const total = dbPrepare(countQuery).get(...countParams).count;
+  const logs = (await pool.query(query, params)).rows;
+  const total = (await pool.query(countQuery, countParams)).rows[0].count;
 
-  res.json({ success: true, logs, total, page: parseInt(page), limit: parseInt(limit) });
+  res.json({ success: true, logs, total: parseInt(total), page: parseInt(page), limit: parseInt(limit) });
 });
 
 // DELETE /admin/logs
-app.delete('/admin/logs', authAdmin, (req, res) => {
-  dbPrepare('DELETE FROM logs').run();
-  addLog('logs_cleared', 'All logs cleared', req.ip);
+app.delete('/admin/logs', authAdmin, async (req, res) => {
+  await pool.query('DELETE FROM logs');
+  await addLog('logs_cleared', 'All logs cleared', req.ip);
   res.json({ success: true, message: 'Logs cleared' });
 });
 
@@ -748,17 +708,17 @@ app.use((req, res, next) => {
 });
 
 // ============================================================
-//  Graceful shutdown - salvar banco
+//  Graceful shutdown
 // ============================================================
-process.on('SIGINT', () => {
-  console.log('\n[DB] Saving database before exit...');
-  saveDatabase();
+process.on('SIGINT', async () => {
+  console.log('\n[DB] Closing database connection...');
+  await pool.end();
   process.exit(0);
 });
 
-process.on('SIGTERM', () => {
-  console.log('\n[DB] Saving database before exit...');
-  saveDatabase();
+process.on('SIGTERM', async () => {
+  console.log('\n[DB] Closing database connection...');
+  await pool.end();
   process.exit(0);
 });
 
@@ -768,12 +728,13 @@ process.on('SIGTERM', () => {
 initDatabase().then(() => {
   app.listen(PORT, () => {
     console.log(`\n╔══════════════════════════════════════════════╗`);
-    console.log(`║     PEDRIN XITS - Auth Panel v2.0           ║`);
+    console.log(`║     PEDRIN XITS - Auth Panel v3.0           ║`);
     console.log(`╠══════════════════════════════════════════════╣`);
     console.log(`║  Server:  http://localhost:${PORT}              ║`);
     console.log(`║  Panel:   http://localhost:${PORT}/admin         ║`);
     console.log(`║  API:     http://localhost:${PORT}/license       ║`);
     console.log(`║                                              ║`);
+    console.log(`║  DB:     PostgreSQL (persistente)            ║`);
     console.log(`║  Admin:   ${ADMIN_USERNAME} / ${ADMIN_PASSWORD}               ║`);
     console.log(`╚══════════════════════════════════════════════╝\n`);
   });

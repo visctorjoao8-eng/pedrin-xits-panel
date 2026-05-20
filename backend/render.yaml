@@ -1,3 +1,9 @@
+databases:
+  - name: pedrin-xits-db
+    plan: free
+    databaseName: pedrin_xits
+    ipAllowList: []
+
 services:
   - type: web
     name: pedrin-xits-panel
@@ -10,3 +16,11 @@ services:
         value: production
       - key: NODE_VERSION
         value: 20
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pedrin-xits-db
+          property: connectionString
+      - key: ADMIN_USERNAME
+        value: "1"
+      - key: ADMIN_PASSWORD
+        value: "1"

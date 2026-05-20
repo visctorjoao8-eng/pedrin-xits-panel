@@ -340,7 +340,7 @@ async function loadKeys(page) {
   var rows = '';
 
   if (data.keys.length === 0) {
-    rows = '<tr><td colspan="8" style="text-align:center;padding:48px;color:var(--text-muted)">' +
+    rows = '<tr><td colspan="3" style="text-align:center;padding:48px;color:var(--text-muted)">' +
       '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 12px;display:block;opacity:.4"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' +
       'Nenhuma key encontrada</td></tr>';
   } else {
@@ -378,11 +378,11 @@ async function loadKeys(page) {
       rows += '<tr>' +
         '<td><span class="key-text" onclick="copyKey(\'' + esc(k.key) + '\')" title="Clique para copiar">' + esc(k.key) + '</span></td>' +
         '<td><span class="badge badge-' + statusBadge + '">' + statusLabel + '</span></td>' +
-        '<td>' + esc(k.client_name || '—') + '</td>' +
-        '<td>' + durationLabel + '</td>' +
-        '<td><span class="hwid-text">' + hwid + '</span></td>' +
-        '<td>' + fmtDate(k.created_at) + '</td>' +
-        '<td>' + (k.expires_at ? fmtDate(k.expires_at) : (k.is_lifetime ? 'Nunca' : '—')) + '</td>' +
+        '<td class="mobile-hide">' + esc(k.client_name || '—') + '</td>' +
+        '<td class="mobile-hide">' + durationLabel + '</td>' +
+        '<td class="mobile-hide"><span class="hwid-text">' + hwid + '</span></td>' +
+        '<td class="mobile-hide">' + fmtDate(k.created_at) + '</td>' +
+        '<td class="mobile-hide">' + (k.expires_at ? fmtDate(k.expires_at) : (k.is_lifetime ? 'Nunca' : '—')) + '</td>' +
         '<td><div class="action-btns">' + btns + '</div></td></tr>';
     }
   }
@@ -392,13 +392,14 @@ async function loadKeys(page) {
   c.innerHTML = '<div class="page-header"><h2>Licenças</h2><div class="actions">' +
     '<button class="btn btn-ghost btn-sm" onclick="togglePauseAll()" id="pauseAllBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pausar Todas</button>' +
     '<button class="btn btn-ghost btn-sm" onclick="exportKeys()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Exportar .TXT</button>' +
+    '<button class="btn btn-danger btn-sm" onclick="deleteAllKeys()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg> Deletar Todas</button>' +
     '<button class="btn btn-primary" onclick="showCreateKeysModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Gerar Keys</button></div></div>' +
     '<div class="table-container">' +
     '<div class="table-toolbar"><div class="search-box">' +
     '<input type="text" id="keySearch" placeholder="Buscar key..." value="' + esc(search) + '" onkeypress="if(event.key===\'Enter\')loadKeys(1)">' +
     '<select id="keyStatusFilter" onchange="loadKeys(1)"><option value="">Todos Status</option><option value="unused"' + (sf === 'unused' ? ' selected' : '') + '>Não Usada</option><option value="active"' + (sf === 'active' ? ' selected' : '') + '>Ativa</option><option value="expired"' + (sf === 'expired' ? ' selected' : '') + '>Expirada</option><option value="banned"' + (sf === 'banned' ? ' selected' : '') + '>Banida</option></select>' +
     '</div><button class="btn btn-ghost btn-sm" onclick="loadKeys(' + keysPage + ')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></div>' +
-    '<div style="overflow-x:auto"><table><thead><tr><th>Key</th><th>Status</th><th>Client</th><th>Duração</th><th>HWID</th><th>Criada</th><th>Expira</th><th>Ações</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div style="overflow-x:auto"><table><thead><tr><th>Key</th><th>Status</th><th class="mobile-hide">Client</th><th class="mobile-hide">Duração</th><th class="mobile-hide">HWID</th><th class="mobile-hide">Criada</th><th class="mobile-hide">Expira</th><th>Ações</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
     '<div class="table-footer">' + pag + '</div></div>';
 
   // Atualizar estado do botão pausar todas
@@ -591,6 +592,19 @@ async function deleteKey(id) {
     api('DELETE', '/admin/keys/' + id).then(function (data) {
       if (data && data.success) { showToast('Key deletada!', 'success'); loadKeys(keysPage); }
       else showToast(data ? data.message : 'Erro', 'error');
+    });
+  });
+}
+
+async function deleteAllKeys() {
+  showConfirm('Deletar Todas as Keys', 'ATENÇÃO: Isso vai deletar TODAS as keys e TODOS os logs permanentemente. Esta ação NÃO pode ser desfeita!', function () {
+    api('DELETE', '/admin/keys').then(function (data) {
+      if (data && data.success) {
+        showToast(data.message, 'success');
+        loadKeys(1);
+      } else {
+        showToast(data ? data.message : 'Erro', 'error');
+      }
     });
   });
 }
