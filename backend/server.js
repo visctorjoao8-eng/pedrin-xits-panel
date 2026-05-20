@@ -91,7 +91,7 @@ async function initDatabase(retries = 5) {
         email TEXT,
         hwid TEXT DEFAULT '',
         ip_address TEXT DEFAULT '',
-        created_at TEXT DEFAULT (datetime('now')),
+        created_at TEXT DEFAULT (now()::text),
         last_login TEXT,
         banned INTEGER DEFAULT 0,
         ban_reason TEXT DEFAULT '',
