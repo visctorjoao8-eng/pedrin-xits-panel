@@ -77,14 +77,15 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ============================================================
 //  Database - PostgreSQL
 // ============================================================
-// Debug: verificar se DATABASE_URL está definida
-console.log('[DB] NODE_ENV:', process.env.NODE_ENV);
-console.log('[DB] DATABASE_URL definida:', !!process.env.DATABASE_URL);
-console.log('[DB] DATABASE_URL prefixo:', process.env.DATABASE_URL ? process.env.DATABASE_URL.substring(0, 40) + '...' : 'UNDEFINED - VERIFICAR ENV VAR NO RENDER');
+// Forcar output imediato
+process.stdout.write('[INIT] Server starting...\n');
+process.stdout.write('[INIT] NODE_ENV: ' + (process.env.NODE_ENV || 'undefined') + '\n');
+process.stdout.write('[INIT] DATABASE_URL exists: ' + (process.env.DATABASE_URL ? 'YES' : 'NO') + '\n');
+process.stdout.write('[INIT] DATABASE_URL prefix: ' + (process.env.DATABASE_URL ? process.env.DATABASE_URL.substring(0, 40) : 'UNDEFINED') + '\n');
 
 if (!process.env.DATABASE_URL) {
-  console.error('[DB] ERRO CRITICO: DATABASE_URL nao esta definida!');
-  console.error('[DB] Verifique se a variavel de ambiente esta configurada no dashboard do Render');
+  process.stderr.write('[DB] ERRO: DATABASE_URL nao definida!\n');
+  process.stderr.write('[DB] Adicione manualmente no dashboard do Render > Environment\n');
 }
 
 const pool = new Pool({
