@@ -77,6 +77,16 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ============================================================
 //  Database - PostgreSQL
 // ============================================================
+// Debug: verificar se DATABASE_URL está definida
+console.log('[DB] NODE_ENV:', process.env.NODE_ENV);
+console.log('[DB] DATABASE_URL definida:', !!process.env.DATABASE_URL);
+console.log('[DB] DATABASE_URL prefixo:', process.env.DATABASE_URL ? process.env.DATABASE_URL.substring(0, 40) + '...' : 'UNDEFINED - VERIFICAR ENV VAR NO RENDER');
+
+if (!process.env.DATABASE_URL) {
+  console.error('[DB] ERRO CRITICO: DATABASE_URL nao esta definida!');
+  console.error('[DB] Verifique se a variavel de ambiente esta configurada no dashboard do Render');
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
@@ -213,6 +223,7 @@ async function initDatabase(retries = 5) {
       return; // Sucesso, sair do loop
     } catch (err) {
       console.error(`[DB] Tentativa ${attempt}/${retries} falhou:`, err.message);
+      console.error(`[DB] Erro completo:`, err.code, err.host, err.port);
       if (attempt === retries) {
         throw new Error(`Falha ao inicializar banco apos ${retries} tentativas: ${err.message}`);
       }
