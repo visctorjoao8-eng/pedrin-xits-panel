@@ -245,6 +245,10 @@ document.getElementById('sidebarOverlay').addEventListener('click', function () 
   toggleSidebar();
 });
 
+// Botão de importar keys
+var importBtn = document.getElementById('importKeysBtn');
+if (importBtn) importBtn.addEventListener('click', function () { showImportKeysModal(); });
+
 // ============================================================
 //  Navigation
 // ============================================================
@@ -392,6 +396,7 @@ async function loadKeys(page) {
 
   c.innerHTML = '<div class="page-header"><h2>Licenças</h2><div class="actions">' +
     '<button class="btn btn-ghost btn-sm" onclick="togglePauseAll()" id="pauseAllBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pausar Todas</button>' +
+    '<button class="btn btn-ghost btn-sm" id="importKeysBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Importar .TXT</button>' +
     '<button class="btn btn-primary" onclick="showCreateKeysModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Gerar Keys</button></div></div>' +
     '<div class="table-container">' +
     '<div class="table-toolbar"><div class="search-box">' +
@@ -534,6 +539,95 @@ async function unbanKey(id) {
   var data = await api('PUT', '/admin/keys/' + id, { status: 'active' });
   if (data && data.success) { showToast('Key desbanida!', 'success'); loadKeys(keysPage); }
   else showToast(data ? data.message : 'Erro', 'error');
+}
+
+function showImportKeysModal() {
+  openModal(
+    '<h3>Importar Keys de .TXT</h3>' +
+    '<p style="color:var(--text-secondary);font-size:13px;line-height:1.6;margin-bottom:16px">Selecione o arquivo .TXT exportado anteriormente. As keys que já existem no banco serão ignoradas.</p>' +
+    '<div class="form-group">' +
+    '<label>Arquivo .TXT</label>' +
+    '<input type="file" id="importFile" accept=".txt" style="padding:10px;border:2px dashed var(--border);border-radius:10px;width:100%;cursor:pointer;background:var(--bg-elevated)">' +
+    '</div>' +
+    '<div id="importPreview" style="display:none;margin-top:12px">' +
+    '<div style="color:var(--text-secondary);font-size:13px;margin-bottom:6px"><strong id="importCount">0</strong> keys encontradas no arquivo</div>' +
+    '<div id="importList" style="max-height:180px;overflow-y:auto;background:var(--bg-elevated);border-radius:8px;padding:8px;font-family:monospace;font-size:12px;color:var(--text-secondary);line-height:1.8"></div>' +
+    '</div>' +
+    '<div id="importResult" style="display:none;margin-top:12px;padding:10px;border-radius:8px;font-size:13px"></div>' +
+    '<div class="modal-actions" style="margin-top:16px"><button class="btn btn-ghost" id="importCancelBtn">Cancelar</button><button class="btn btn-primary" id="importSubmitBtn" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Importar</button></div>'
+  );
+  setTimeout(function () {
+    document.getElementById('importCancelBtn').addEventListener('click', function () { closeModal(); });
+    document.getElementById('importSubmitBtn').addEventListener('click', function () { processImport(); });
+    document.getElementById('importFile').addEventListener('change', function (e) { handleImportFile(e); });
+  }, 50);
+}
+
+function handleImportFile(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function (evt) {
+    var text = evt.target.result;
+    var lines = text.split('\n');
+    var keys = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      if (line.indexOf('Key:') === 0) {
+        var keyVal = line.substring(4).trim();
+        if (keyVal) keys.push(keyVal);
+      }
+    }
+    if (keys.length === 0) {
+      document.getElementById('importPreview').style.display = 'none';
+      document.getElementById('importSubmitBtn').disabled = true;
+      showToast('Nenhuma key encontrada no arquivo.', 'error');
+      return;
+    }
+    var previewList = document.getElementById('importList');
+    var displayKeys = keys.slice(0, 50);
+    var html = '';
+    for (var j = 0; j < displayKeys.length; j++) {
+      html += esc(displayKeys[j]) + '<br>';
+    }
+    if (keys.length > 50) {
+      html += '<em>...e mais ' + (keys.length - 50) + ' keys</em>';
+    }
+    previewList.innerHTML = html;
+    document.getElementById('importCount').textContent = keys.length;
+    document.getElementById('importPreview').style.display = 'block';
+    document.getElementById('importSubmitBtn').disabled = false;
+    document.getElementById('importFile')._keys = keys;
+  };
+  reader.readAsText(file);
+}
+
+async function processImport() {
+  var fileInput = document.getElementById('importFile');
+  var keys = fileInput._keys || [];
+  if (keys.length === 0) { showToast('Nenhuma key para importar.', 'error'); return; }
+
+  document.getElementById('importSubmitBtn').disabled = true;
+  document.getElementById('importSubmitBtn').textContent = 'Importando...';
+
+  var data = await api('POST', '/admin/keys/import', { keys: keys });
+
+  if (!data || !data.success) {
+    document.getElementById('importSubmitBtn').disabled = false;
+    document.getElementById('importSubmitBtn').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Importar';
+    showToast(data ? data.message : 'Erro ao importar.', 'error');
+    return;
+  }
+
+  var resultEl = document.getElementById('importResult');
+  resultEl.style.display = 'block';
+  resultEl.style.background = 'rgba(34,197,94,0.1)';
+  resultEl.style.color = 'var(--success)';
+  resultEl.innerHTML = '✔ ' + data.imported + ' keys importadas com sucesso!' +
+    (data.skipped > 0 ? ' (' + data.skipped + ' ignoradas por já existirem)' : '');
+
+  showToast(data.imported + ' keys importadas!', 'success');
+  loadKeys(1);
 }
 
 async function deleteKey(id) {

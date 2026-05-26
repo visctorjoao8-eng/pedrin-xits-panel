@@ -698,6 +698,45 @@ app.delete('/admin/keys/:id', authAdmin, async (req, res) => {
   }
 });
 
+// POST /admin/keys/import - Importar keys de arquivo TXT
+app.post('/admin/keys/import', authAdmin, async (req, res) => {
+  try {
+    const { keys } = req.body;
+    if (!keys || !Array.isArray(keys) || keys.length === 0) {
+      return res.json({ success: false, message: 'Nenhuma key para importar' });
+    }
+
+    var imported = 0;
+    var skipped = 0;
+
+    for (var i = 0; i < keys.length; i++) {
+      var keyStr = keys[i].trim();
+      if (!keyStr) continue;
+
+      // Verificar se a key já existe
+      var existing = await pool.query('SELECT id FROM license_keys WHERE key = $1', [keyStr]);
+      if (existing.rows.length > 0) {
+        skipped++;
+        continue;
+      }
+
+      // Inserir nova key
+      var id = uuidv4();
+      await pool.query(
+        "INSERT INTO license_keys (id, key, status, duration_days, is_lifetime, client_name, notes, created_by) VALUES ($1, $2, 'unused', 30, 0, '', '', 'import')",
+        [id, keyStr]
+      );
+      imported++;
+    }
+
+    await addLog('keys_imported', `Imported ${imported} keys (${skipped} skipped)`, req.ip);
+    res.json({ success: true, imported: imported, skipped: skipped, message: `${imported} keys importadas, ${skipped} ignoradas` });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao importar keys:', err.message);
+    res.json({ success: false, message: 'Database error' });
+  }
+});
+
 // DELETE /admin/keys - Deletar todas as keys
 app.delete('/admin/keys', authAdmin, async (req, res) => {
   try {
