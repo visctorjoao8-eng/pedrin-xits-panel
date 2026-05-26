@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const cors = require('cors');
 const path = require('path');
+const helmet = require('helmet');
 
 // ============================================================
 //  Configuração
@@ -19,6 +20,53 @@ const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "1";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "1";
 
 const app = express();
+
+// Remover header X-Powered-By para não expor tecnologia
+app.disable('x-powered-by');
+
+// Segurança HTTP Headers via Helmet
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://fonts.googleapis.com"],
+      imgSrc: ["'self'", "data:"],
+      connectSrc: ["'self'"],
+      frameSrc: ["'none'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+    },
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true,
+  },
+  frameguard: {
+    action: 'deny',
+  },
+  noSniff: true,
+  referrerPolicy: {
+    policy: 'strict-origin-when-cross-origin',
+  },
+  permissionsPolicy: {
+    features: {
+      camera: ["'none'"],
+      microphone: ["'none'"],
+      geolocation: ["'none'"],
+      payment: ["'none'"],
+      usb: ["'none'"],
+      magnetometer: ["'none'"],
+      gyroscope: ["'none'"],
+      accelerometer: ["'none'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
+
 app.use(cors({
   origin: true,
   credentials: true

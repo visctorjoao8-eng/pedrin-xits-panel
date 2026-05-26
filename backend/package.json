@@ -17,10 +17,11 @@
   "type": "commonjs",
   "dependencies": {
     "bcryptjs": "^3.0.3",
-    "pg": "^8.13.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "helmet": "^8.2.0",
     "jsonwebtoken": "^9.0.3",
+    "pg": "^8.13.0",
     "uuid": "^14.0.0"
   },
   "devDependencies": {

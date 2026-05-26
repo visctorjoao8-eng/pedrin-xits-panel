@@ -128,15 +128,16 @@ function showConfirm(title, message, onConfirm) {
     '<h3>' + esc(title) + '</h3>' +
     '<p style="color:var(--text-secondary);font-size:14px;line-height:1.6;margin-bottom:8px">' + esc(message) + '</p>' +
     '<div class="modal-actions">' +
-    '<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>' +
+    '<button class="btn btn-ghost" id="confirmCancelBtn">Cancelar</button>' +
     '<button class="btn btn-danger" id="confirmOkBtn">Confirmar</button>' +
     '</div>'
   );
   setTimeout(function () {
-    document.getElementById('confirmOkBtn').onclick = function () {
+    document.getElementById('confirmCancelBtn').addEventListener('click', function () { closeModal(); });
+    document.getElementById('confirmOkBtn').addEventListener('click', function () {
       closeModal();
       onConfirm();
-    };
+    });
   }, 50);
 }
 
@@ -243,6 +244,32 @@ function doLogout() {
 
 document.getElementById('loginPass').addEventListener('keypress', function (e) { if (e.key === 'Enter') doLogin(); });
 document.getElementById('loginUser').addEventListener('keypress', function (e) { if (e.key === 'Enter') document.getElementById('loginPass').focus(); });
+
+// Event listeners para elementos que tinham onclick inline
+document.getElementById('loginBtn').addEventListener('click', function () { doLogin(); });
+document.getElementById('logoutBtn').addEventListener('click', function () { doLogout(); });
+document.getElementById('sidebarToggle').addEventListener('click', function () { toggleSidebarCollapse(); });
+document.getElementById('hamburgerBtn').addEventListener('click', function () { toggleSidebar(); });
+
+// Navegação da sidebar via data-nav
+var navItems = document.querySelectorAll('[data-nav]');
+for (var i = 0; i < navItems.length; i++) {
+  (function (item) {
+    item.addEventListener('click', function () {
+      navigateTo(item.getAttribute('data-nav'));
+    });
+  })(navItems[i]);
+}
+
+// Modal close on overlay click
+document.getElementById('modalOverlay').addEventListener('click', function (e) {
+  if (e.target === this) closeModal();
+});
+
+// Sidebar overlay close
+document.getElementById('sidebarOverlay').addEventListener('click', function () {
+  toggleSidebar();
+});
 
 // ============================================================
 //  Navigation
@@ -423,11 +450,16 @@ function showCreateKeysModal() {
     '<h3>Gerar Keys</h3>' +
     '<div class="form-group"><label>Quantidade</label><input type="number" id="mkCount" value="1" min="1" max="100"></div>' +
     '<div class="form-group"><label>Nome do Client</label><input type="text" id="mkClientName" placeholder="Opcional (ex: GELADO)"></div>' +
-    '<div class="form-group"><label>Duração</label><select id="mkDurationType" onchange="toggleDurationInput()"><option value="days">Diário (em dias)</option><option value="lifetime">Lifetime</option></select></div>' +
+    '<div class="form-group"><label>Duração</label><select id="mkDurationType"><option value="days">Diário (em dias)</option><option value="lifetime">Lifetime</option></select></div>' +
     '<div class="form-group" id="mkDaysGroup"><label>Dias</label><input type="number" id="mkDuration" value="30" min="1"></div>' +
     '<div id="mkResult"></div>' +
-    '<div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="createKeys()">Gerar</button></div>'
+    '<div class="modal-actions"><button class="btn btn-ghost" id="mkCancelBtn">Cancelar</button><button class="btn btn-primary" id="mkGenerateBtn">Gerar</button></div>'
   );
+  setTimeout(function () {
+    document.getElementById('mkDurationType').addEventListener('change', function () { toggleDurationInput(); });
+    document.getElementById('mkCancelBtn').addEventListener('click', function () { closeModal(); });
+    document.getElementById('mkGenerateBtn').addEventListener('click', function () { createKeys(); });
+  }, 50);
 }
 
 function toggleDurationInput() {
@@ -502,8 +534,12 @@ function showExtendModal(id) {
   openModal(
     '<h3>Estender Validade</h3>' +
     '<div class="form-group"><label>Dias para adicionar</label><input type="number" id="extDays" value="30" min="1"></div>' +
-    '<div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="extendKey(\'' + id + '\')">Estender</button></div>'
+    '<div class="modal-actions"><button class="btn btn-ghost" id="extCancelBtn">Cancelar</button><button class="btn btn-primary" id="extSaveBtn">Estender</button></div>'
   );
+  setTimeout(function () {
+    document.getElementById('extCancelBtn').addEventListener('click', function () { closeModal(); });
+    document.getElementById('extSaveBtn').addEventListener('click', function () { extendKey(id); });
+  }, 50);
 }
 
 async function extendKey(id) {
@@ -669,8 +705,12 @@ function showAdminModal() {
     '<h3>Alterar Senha Admin</h3>' +
     '<div class="form-group"><label>Senha Atual</label><input type="password" id="adminOldPass" placeholder="••••••••"></div>' +
     '<div class="form-group"><label>Nova Senha</label><input type="password" id="adminNewPass" placeholder="••••••••"></div>' +
-    '<div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="saveAdmin()">Salvar</button></div>'
+    '<div class="modal-actions"><button class="btn btn-ghost" id="adminCancelBtn">Cancelar</button><button class="btn btn-primary" id="adminSaveBtn">Salvar</button></div>'
   );
+  setTimeout(function () {
+    document.getElementById('adminCancelBtn').addEventListener('click', function () { closeModal(); });
+    document.getElementById('adminSaveBtn').addEventListener('click', function () { saveAdmin(); });
+  }, 50);
 }
 
 async function saveAdmin() {

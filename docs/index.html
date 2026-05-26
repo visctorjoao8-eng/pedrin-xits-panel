@@ -47,7 +47,7 @@
         </div>
         <input type="password" id="loginPass" placeholder="Senha" autocomplete="current-password">
       </div>
-      <button class="btn btn-primary btn-full btn-login" onclick="doLogin()" id="loginBtn">
+      <button class="btn btn-primary btn-full btn-login" id="loginBtn">
         <span class="btn-text">Entrar</span>
         <span class="btn-loader" style="display:none">
           <svg class="spinner" width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
@@ -82,7 +82,7 @@
       </div>
 
       <nav class="sidebar-nav">
-        <div class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard')">
+        <div class="nav-item active" data-page="dashboard" data-nav="dashboard">
           <span class="nav-indicator"></span>
           <span class="nav-icon">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -94,7 +94,7 @@
           </span>
           <span class="nav-label">Dashboard</span>
         </div>
-        <div class="nav-item" data-page="keys" onclick="navigateTo('keys')">
+        <div class="nav-item" data-page="keys" data-nav="keys">
           <span class="nav-indicator"></span>
           <span class="nav-icon">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -103,7 +103,7 @@
           </span>
           <span class="nav-label">Licenças</span>
         </div>
-        <div class="nav-item" data-page="logs" onclick="navigateTo('logs')">
+        <div class="nav-item" data-page="logs" data-nav="logs">
           <span class="nav-indicator"></span>
           <span class="nav-icon">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -119,7 +119,7 @@
       </nav>
 
       <div class="sidebar-footer">
-        <button class="logout-btn" onclick="doLogout()">
+        <button class="logout-btn" id="logoutBtn">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
             <polyline points="16 17 21 12 16 7"/>
@@ -132,7 +132,7 @@
 
     <!-- MOBILE HEADER -->
     <div class="mobile-header" id="mobileHeader">
-      <button class="hamburger" onclick="toggleSidebar()">
+      <button class="hamburger" id="hamburgerBtn">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
       </button>
       <span class="mobile-title">PEDRIN XITS</span>
@@ -143,12 +143,12 @@
   </div>
 
   <!-- MODAL -->
-  <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal-overlay" id="modalOverlay">
     <div class="modal" id="modalContent"></div>
   </div>
 
   <!-- OVERLAY for mobile sidebar -->
-  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
   <script src="app.js"></script>
 </body>
