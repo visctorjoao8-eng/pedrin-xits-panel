@@ -7,63 +7,29 @@ const crypto = require('crypto');
 const cors = require('cors');
 const path = require('path');
 const helmet = require('helmet');
+require('dotenv').config();
 
 // ============================================================
 //  Configuração
 // ============================================================
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
-const APP_NAME = "Pedrin Xits";
-const OWNER_ID = "3616b50c-8ff3-4629-a89b-11c53f3f3643";
-const APP_SECRET = "1facb137182890f342db9067b80c779107c29fb1ff3d595934b6bdb01f51fa1d";
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "1";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "1";
+
+// Default app legacy constants (used when no app_id is specified or for backwards compat)
+const DEFAULT_APP_NAME = "Pedrin Xits";
+const DEFAULT_OWNER_ID = "3616b50c-8ff3-4629-a89b-11c53f3f3643";
+const DEFAULT_APP_SECRET = "1facb137182890f342db9067b80c779107c29fb1ff3d595934b6bdb01f51fa1d";
 
 const app = express();
 
 // Remover header X-Powered-By para não expor tecnologia
 app.disable('x-powered-by');
 
-// Segurança HTTP Headers via Helmet
+// Seguranca HTTP Headers via Helmet (CSP desabilitado para desenvolvimento)
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://fonts.googleapis.com"],
-      imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'"],
-      frameSrc: ["'none'"],
-      objectSrc: ["'none'"],
-      baseUri: ["'self'"],
-      formAction: ["'self'"],
-    },
-  },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true,
-  },
-  frameguard: {
-    action: 'deny',
-  },
-  noSniff: true,
-  referrerPolicy: {
-    policy: 'strict-origin-when-cross-origin',
-  },
-  permissionsPolicy: {
-    features: {
-      camera: ["'none'"],
-      microphone: ["'none'"],
-      geolocation: ["'none'"],
-      payment: ["'none'"],
-      usb: ["'none'"],
-      magnetometer: ["'none'"],
-      gyroscope: ["'none'"],
-      accelerometer: ["'none'"],
-    },
-  },
+  contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
 }));
 
@@ -72,7 +38,15 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: false,
+  lastModified: false,
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+}));
 
 // ============================================================
 //  Database - PostgreSQL
@@ -136,6 +110,16 @@ async function initDatabase(retries = 5) {
     const client = await pool.connect();
     try {
     // Tabelas
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS apps (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        app_secret TEXT NOT NULL,
+        created_at TEXT DEFAULT (now()::text)
+      )
+    `);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS app_settings (
         key TEXT PRIMARY KEY,
@@ -204,19 +188,27 @@ async function initDatabase(retries = 5) {
     await addColumnIfNotExists('license_keys', 'paused', 'INTEGER DEFAULT 0');
     await addColumnIfNotExists('license_keys', 'paused_at', 'TEXT');
     await addColumnIfNotExists('license_keys', 'total_paused_ms', 'INTEGER DEFAULT 0');
+    await addColumnIfNotExists('license_keys', 'app_id', 'TEXT');
+
+    // Inserir app padrão "Pedrin Xits" se não existir
+    const defaultAppId = '00000000-0000-0000-0000-000000000001';
+    await client.query(
+      'INSERT INTO apps (id, name, owner_id, app_secret) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING',
+      [defaultAppId, DEFAULT_APP_NAME, DEFAULT_OWNER_ID, DEFAULT_APP_SECRET]
+    );
 
     // Inserir configurações padrão se não existirem
     await client.query(
       'INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
-      ['app_name', APP_NAME]
+      ['app_name', DEFAULT_APP_NAME]
     );
     await client.query(
       'INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
-      ['owner_id', OWNER_ID]
+      ['owner_id', DEFAULT_OWNER_ID]
     );
     await client.query(
       'INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
-      ['app_secret', APP_SECRET]
+      ['app_secret', DEFAULT_APP_SECRET]
     );
 
       dbConnected = true;
@@ -292,9 +284,9 @@ function daysUntilExpiry(expiresAt) {
 // ============================================================
 //  HMAC Verification
 // ============================================================
-function verifyHmac(signature, timestamp, payload) {
+function verifyHmacWithSecret(signature, timestamp, payload, secret) {
   try {
-    const secretBytes = Buffer.from(APP_SECRET, 'hex');
+    const secretBytes = Buffer.from(secret, 'hex');
     const hmac = crypto.createHmac('sha256', secretBytes);
     hmac.update(payload);
     const computed = hmac.digest('hex');
@@ -303,6 +295,10 @@ function verifyHmac(signature, timestamp, payload) {
     console.error('[HMAC] Verification error:', e.message);
     return false;
   }
+}
+
+function verifyHmac(signature, timestamp, payload) {
+  return verifyHmacWithSecret(signature, timestamp, payload, DEFAULT_APP_SECRET);
 }
 
 // ============================================================
@@ -363,34 +359,77 @@ app.post('/license/validate', async (req, res) => {
   const timestamp = req.headers['x-timestamp'];
   const signature = req.headers['x-signature'];
 
-    console.log(`[API] License validate request - Key: ${license_key ? license_key.substring(0, 8) + '...' : 'null'}`);
+  console.log(`[API] License validate request - Key: ${license_key ? license_key.substring(0, 8) + '...' : 'null'}, App: ${app_name}, Owner: ${owner_id}`);
 
-    if (!license_key) {
-      return res.json({ success: false, message: 'License key is required' });
-    }
+  if (!license_key) {
+    return res.json({ success: false, message: 'License key is required' });
+  }
 
-  if (signature && timestamp) {
-    const payload = `${app_name || APP_NAME}|${owner_id || OWNER_ID}|${license_key}|${fingerprint || ''}|${timestamp}`;
-    const valid = verifyHmac(signature, timestamp, payload);
-    if (!valid) {
-      console.log('[API] HMAC verification failed');
-      await addLog('hmac_fail', `Key: ${license_key}`, clientIp);
+  // Busca a key no banco
+  let keyRow;
+  try {
+    const result = await pool.query('SELECT * FROM license_keys WHERE key = $1', [license_key]);
+    keyRow = result.rows[0];
+  } catch (dbErr) {
+    console.error('[DB] Erro na query validate:', dbErr.message);
+    return res.json({ success: false, message: 'Database error, please try again' });
+  }
+
+  if (!keyRow) {
+    await addLog('validate_fail', `Key not found: ${license_key}`, clientIp);
+    return res.json({ success: false, message: 'Key not found' });
+  }
+
+  // Determina o app que esta fazendo a request pelo app_name/owner_id
+  // Se mandou app_name e owner_id, busca o app no banco e verifica o HMAC com o secret dele
+  // Se nao mandou, usa compatibilidade com o app padrão
+  let requestAppSecret = null;
+  let requestAppName = null;
+  let requestOwnerId = null;
+
+  if (app_name && owner_id) {
+    // Busca o app que corresponde ao app_name + owner_id enviados
+    const appResult = await pool.query('SELECT * FROM apps WHERE name = $1 AND owner_id = $2', [app_name, owner_id]);
+    if (appResult.rows.length > 0) {
+      requestAppSecret = appResult.rows[0].app_secret;
+      requestAppName = appResult.rows[0].name;
+      requestOwnerId = appResult.rows[0].owner_id;
     }
   }
 
-    let rows;
-    try {
-      const result = await pool.query('SELECT * FROM license_keys WHERE key = $1', [license_key]);
-      rows = result.rows;
-    } catch (dbErr) {
-      console.error('[DB] Erro na query validate:', dbErr.message);
-      return res.json({ success: false, message: 'Database error, please try again' });
-    }
-    const keyRow = rows[0];
+  // Se nao encontrou o app pela request, usa o app padrão (compatibilidade)
+  if (!requestAppSecret) {
+    requestAppSecret = DEFAULT_APP_SECRET;
+    requestAppName = DEFAULT_APP_NAME;
+    requestOwnerId = DEFAULT_OWNER_ID;
+  }
 
-    if (!keyRow) {
-    await addLog('validate_fail', `Key not found: ${license_key}`, clientIp);
-    return res.json({ success: false, message: 'Key not found' });
+  // Verifica HMAC com o secret do app que enviou o request
+  if (signature && timestamp) {
+    const payload = `${requestAppName}|${requestOwnerId}|${license_key}|${fingerprint || ''}|${timestamp}`;
+    const valid = verifyHmacWithSecret(signature, timestamp, payload, requestAppSecret);
+    if (!valid) {
+      console.log('[API] HMAC verification failed - wrong app/secret');
+      await addLog('hmac_fail', `Key: ${license_key}, App: ${app_name}`, clientIp);
+      return res.json({ success: false, message: 'Invalid signature - key does not belong to this application' });
+    }
+  }
+
+  // VERIFICACAO CRITICA: a key pertence ao app que esta validando?
+  // Se a key tem app_id, ele deve ser o mesmo app que enviou o request
+  if (keyRow.app_id && requestAppName) {
+    const keyAppResult = await pool.query('SELECT name FROM apps WHERE id = $1', [keyRow.app_id]);
+    const keyAppName = keyAppResult.rows.length > 0 ? keyAppResult.rows[0].name : DEFAULT_APP_NAME;
+    // Busca o id do app do request
+    const requestAppResult = await pool.query('SELECT id FROM apps WHERE name = $1 AND owner_id = $2', [requestAppName, requestOwnerId]);
+    if (requestAppResult.rows.length > 0) {
+      const requestAppId = requestAppResult.rows[0].id;
+      if (keyRow.app_id !== requestAppId) {
+        console.log(`[API] Key belongs to app "${keyAppName}" but request is from "${requestAppName}"`);
+        await addLog('key_app_mismatch', `Key: ${license_key} (app: ${keyAppName}) tried by app: ${requestAppName}`, clientIp);
+        return res.json({ success: false, message: 'Key does not belong to this application' });
+      }
+    }
   }
 
   if (keyRow.status === 'banned') {
@@ -427,7 +466,8 @@ app.post('/license/validate', async (req, res) => {
       message: 'License activated successfully',
       session_token: uuidv4(),
       expires_at: expiresAt || 'lifetime',
-      username: keyRow.client_name || license_key
+      username: keyRow.client_name || license_key,
+      app_name: requestAppName || DEFAULT_APP_NAME
     };
 
     if (expiresAt && !keyRow.is_lifetime) {
@@ -468,7 +508,8 @@ app.post('/license/validate', async (req, res) => {
       message: 'License valid',
       session_token: uuidv4(),
       expires_at: keyRow.expires_at || 'lifetime',
-      username: keyRow.client_name || license_key
+      username: keyRow.client_name || license_key,
+      app_name: requestAppName || DEFAULT_APP_NAME
     };
 
     if (keyRow.expires_at && !keyRow.is_lifetime) {
@@ -524,6 +565,16 @@ app.post('/license/check', async (req, res) => {
     statusInfo.days_remaining = daysUntilExpiry(keyRow.expires_at);
   }
 
+  // Include app info
+  if (keyRow.app_id) {
+    const appRes = await pool.query('SELECT name FROM apps WHERE id = $1', [keyRow.app_id]);
+    statusInfo.app_name = appRes.rows.length > 0 ? appRes.rows[0].name : null;
+    statusInfo.app_id = keyRow.app_id;
+  } else {
+    statusInfo.app_name = DEFAULT_APP_NAME;
+    statusInfo.app_id = null;
+  }
+
   return res.json(statusInfo);
 });
 
@@ -551,6 +602,96 @@ app.post('/admin/login', async (req, res) => {
 });
 
 // ============================================================
+//  ROTAS ADMIN - Apps (Multi-application management)
+// ============================================================
+
+// POST /admin/apps - Create a new application
+app.post('/admin/apps', authAdmin, async (req, res) => {
+  try {
+    const { name, owner_id } = req.body;
+    if (!name || !name.trim()) {
+      return res.json({ success: false, message: 'Nome do aplicativo é obrigatório' });
+    }
+    const appId = uuidv4();
+    const generatedOwnerId = owner_id && owner_id.trim() ? owner_id.trim() : uuidv4();
+    const generatedSecret = crypto.randomBytes(32).toString('hex');
+    await pool.query(
+      'INSERT INTO apps (id, name, owner_id, app_secret) VALUES ($1, $2, $3, $4)',
+      [appId, name.trim(), generatedOwnerId, generatedSecret]
+    );
+    await addLog('app_created', `App: ${name.trim()} (${appId})`, req.ip);
+    res.json({
+      success: true,
+      app: { id: appId, name: name.trim(), owner_id: generatedOwnerId, app_secret: generatedSecret, created_at: new Date().toISOString() }
+    });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao criar app:', err.message);
+    res.json({ success: false, message: 'Database error' });
+  }
+});
+
+// GET /admin/apps - List all applications
+app.get('/admin/apps', authAdmin, async (req, res) => {
+  try {
+    const apps = (await pool.query('SELECT * FROM apps ORDER BY created_at DESC')).rows;
+    // Count keys per app
+    const keysPerApp = (await pool.query('SELECT app_id, COUNT(*) as count FROM license_keys GROUP BY app_id')).rows;
+    const keyCountMap = {};
+    for (const row of keysPerApp) {
+      keyCountMap[row.app_id] = parseInt(row.count);
+    }
+    // Add key count to each app
+    for (const a of apps) {
+      a.key_count = keyCountMap[a.id] || 0;
+    }
+    res.json({ success: true, apps });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao listar apps:', err.message);
+    res.json({ success: false, message: 'Database error', apps: [] });
+  }
+});
+
+// GET /admin/apps/:id - Get single app details
+app.get('/admin/apps/:id', authAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('SELECT * FROM apps WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.json({ success: false, message: 'Aplicativo não encontrado' });
+    }
+    res.json({ success: true, app: result.rows[0] });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao buscar app:', err.message);
+    res.json({ success: false, message: 'Database error' });
+  }
+});
+
+// DELETE /admin/apps/:id - Delete an application
+app.delete('/admin/apps/:id', authAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Prevent deletion of default app
+    if (id === '00000000-0000-0000-0000-000000000001') {
+      return res.json({ success: false, message: 'Não é possível deletar o aplicativo padrão' });
+    }
+    const result = await pool.query('SELECT * FROM apps WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.json({ success: false, message: 'Aplicativo não encontrado' });
+    }
+    const appName = result.rows[0].name;
+    // Set app_id to NULL for keys belonging to this app
+    await pool.query('UPDATE license_keys SET app_id = NULL WHERE app_id = $1', [id]);
+    // Delete the app
+    await pool.query('DELETE FROM apps WHERE id = $1', [id]);
+    await addLog('app_deleted', `App: ${appName} (${id})`, req.ip);
+    res.json({ success: true, message: `Aplicativo "${appName}" deletado. Keys foram desassociadas.` });
+  } catch (err) {
+    console.error('[ADMIN] Erro ao deletar app:', err.message);
+    res.json({ success: false, message: 'Database error' });
+  }
+});
+
+// ============================================================
 //  ROTAS ADMIN - Dashboard
 // ============================================================
 
@@ -564,6 +705,7 @@ app.get('/admin/dashboard', authAdmin, async (req, res) => {
   const bannedKeys = (await pool.query("SELECT COUNT(*) as count FROM license_keys WHERE status = 'banned'")).rows[0].count;
   const pausedKeys = (await pool.query("SELECT COUNT(*) as count FROM license_keys WHERE paused = 1")).rows[0].count;
 
+  const totalApps = (await pool.query('SELECT COUNT(*) as count FROM apps')).rows[0].count;
   const recentLogs = (await pool.query('SELECT * FROM logs ORDER BY id DESC LIMIT 50')).rows;
 
   res.json({
@@ -574,7 +716,8 @@ app.get('/admin/dashboard', authAdmin, async (req, res) => {
       unused_keys: parseInt(unusedKeys),
       expired_keys: parseInt(expiredKeys),
       banned_keys: parseInt(bannedKeys),
-      paused_keys: parseInt(pausedKeys)
+      paused_keys: parseInt(pausedKeys),
+      total_apps: parseInt(totalApps)
     },
     recent_logs: recentLogs
   });
@@ -591,10 +734,10 @@ app.get('/admin/dashboard', authAdmin, async (req, res) => {
 // GET /admin/keys - Listar todas as keys
 app.get('/admin/keys', authAdmin, async (req, res) => {
   try {
-  const { status, search, page = 1, limit = 50 } = req.query;
+  const { status, search, app_id, page = 1, limit = 50 } = req.query;
   const offset = (page - 1) * limit;
 
-  let query = 'SELECT * FROM license_keys WHERE 1=1';
+   let query = "SELECT lk.*, COALESCE(a.name, 'Pedrin Xits') as app_name FROM license_keys lk LEFT JOIN apps a ON lk.app_id = a.id WHERE 1=1";
   let countQuery = 'SELECT COUNT(*) as count FROM license_keys WHERE 1=1';
   const params = [];
   const countParams = [];
@@ -602,21 +745,32 @@ app.get('/admin/keys', authAdmin, async (req, res) => {
   let countParamIndex = 1;
 
   if (status) {
-    query += ` AND status = $${paramIndex++}`;
+    query += ` AND lk.status = $${paramIndex++}`;
     countQuery += ` AND status = $${countParamIndex++}`;
     params.push(status);
     countParams.push(status);
   }
   if (search) {
-    query += ` AND (key LIKE $${paramIndex} OR notes LIKE $${paramIndex + 1} OR client_name LIKE $${paramIndex + 2})`;
+    query += ` AND (lk.key LIKE $${paramIndex} OR lk.notes LIKE $${paramIndex + 1} OR lk.client_name LIKE $${paramIndex + 2})`;
     countQuery += ` AND (key LIKE $${countParamIndex} OR notes LIKE $${countParamIndex + 1} OR client_name LIKE $${countParamIndex + 2})`;
     params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     countParams.push(`%${search}%`, `%${search}%`, `%${search}%`);
     paramIndex += 3;
     countParamIndex += 3;
   }
+  if (app_id) {
+    if (app_id === '__none__') {
+      query += ` AND lk.app_id IS NULL`;
+      countQuery += ` AND app_id IS NULL`;
+    } else {
+      query += ` AND lk.app_id = $${paramIndex++}`;
+      countQuery += ` AND app_id = $${countParamIndex++}`;
+      params.push(app_id);
+      countParams.push(app_id);
+    }
+  }
 
-  query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+  query += ` ORDER BY lk.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
   params.push(parseInt(limit), parseInt(offset));
 
   const keys = (await pool.query(query, params)).rows;
@@ -632,22 +786,33 @@ app.get('/admin/keys', authAdmin, async (req, res) => {
 // POST /admin/keys - Criar nova key
 app.post('/admin/keys', authAdmin, async (req, res) => {
   try {
-  const { count = 1, duration_type = 'days', duration_days = 30, client_name = '' } = req.body;
+  const { count = 1, duration_type = 'days', duration_days = 30, client_name = '', app_id = null } = req.body;
   const keys = [];
   const isLifetime = duration_type === 'lifetime' ? 1 : 0;
   const days = isLifetime ? 0 : (parseInt(duration_days) || 30);
+
+  // If app_id provided, verify it exists
+  let appName = null;
+  if (app_id) {
+    const appCheck = await pool.query('SELECT name FROM apps WHERE id = $1', [app_id]);
+    if (appCheck.rows.length === 0) {
+      return res.json({ success: false, message: 'Aplicativo não encontrado' });
+    }
+    appName = appCheck.rows[0].name;
+  }
 
   for (let i = 0; i < Math.min(count, 100); i++) {
     const id = uuidv4();
     const key = generateLicenseKey(client_name, isLifetime, days);
     await pool.query(`
-      INSERT INTO license_keys (id, key, status, duration_days, is_lifetime, client_name, notes, created_by)
-      VALUES ($1, $2, 'unused', $3, $4, $5, '', 'admin')
-    `, [id, key, days, isLifetime, client_name || '']);
+      INSERT INTO license_keys (id, key, status, duration_days, is_lifetime, client_name, notes, created_by, app_id)
+      VALUES ($1, $2, 'unused', $3, $4, $5, '', 'admin', $6)
+    `, [id, key, days, isLifetime, client_name || '', app_id || null]);
     keys.push(key);
   }
 
-  await addLog('keys_created', `Created ${keys.length} keys (${isLifetime ? 'lifetime' : days + 'd'}, client: ${client_name || 'none'})`, req.ip);
+  const appLabel = appName ? `, app: ${appName}` : '';
+  await addLog('keys_created', `Created ${keys.length} keys (${isLifetime ? 'lifetime' : days + 'd'}, client: ${client_name || 'none'}${appLabel})`, req.ip);
   res.json({ success: true, keys, count: keys.length });
   } catch (err) {
     console.error('[ADMIN] Erro ao criar keys:', err.message);
@@ -713,41 +878,41 @@ app.delete('/admin/keys/:id', authAdmin, async (req, res) => {
 // POST /admin/keys/import - Importar keys de arquivo TXT
 app.post('/admin/keys/import', authAdmin, async (req, res) => {
   try {
-    const { keys } = req.body;
-    if (!keys || !Array.isArray(keys) || keys.length === 0) {
-      return res.json({ success: false, message: 'Nenhuma key para importar' });
-    }
-
-    var imported = 0;
-    var skipped = 0;
-
-    for (var i = 0; i < keys.length; i++) {
-      var keyStr = keys[i].trim();
-      if (!keyStr) continue;
-
-      // Verificar se a key já existe
-      var existing = await pool.query('SELECT id FROM license_keys WHERE key = $1', [keyStr]);
-      if (existing.rows.length > 0) {
-        skipped++;
-        continue;
+      const { keys, app_id = null } = req.body;
+      if (!keys || !Array.isArray(keys) || keys.length === 0) {
+        return res.json({ success: false, message: 'Nenhuma key para importar' });
       }
 
-      // Inserir nova key
-      var id = uuidv4();
-      await pool.query(
-        "INSERT INTO license_keys (id, key, status, duration_days, is_lifetime, client_name, notes, created_by) VALUES ($1, $2, 'unused', 30, 0, '', '', 'import')",
-        [id, keyStr]
-      );
-      imported++;
-    }
+      var imported = 0;
+      var skipped = 0;
 
-    await addLog('keys_imported', `Imported ${imported} keys (${skipped} skipped)`, req.ip);
-    res.json({ success: true, imported: imported, skipped: skipped, message: `${imported} keys importadas, ${skipped} ignoradas` });
-  } catch (err) {
-    console.error('[ADMIN] Erro ao importar keys:', err.message);
-    res.json({ success: false, message: 'Database error' });
-  }
-});
+      for (var i = 0; i < keys.length; i++) {
+        var keyStr = keys[i].trim();
+        if (!keyStr) continue;
+
+        // Verificar se a key já existe
+        var existing = await pool.query('SELECT id FROM license_keys WHERE key = $1', [keyStr]);
+        if (existing.rows.length > 0) {
+          skipped++;
+          continue;
+        }
+
+        // Inserir nova key
+        var id = uuidv4();
+        await pool.query(
+          "INSERT INTO license_keys (id, key, status, duration_days, is_lifetime, client_name, notes, created_by, app_id) VALUES ($1, $2, 'unused', 30, 0, '', '', 'import', $3)",
+          [id, keyStr, app_id || null]
+        );
+        imported++;
+      }
+
+      await addLog('keys_imported', `Imported ${imported} keys (${skipped} skipped)`, req.ip);
+      res.json({ success: true, imported: imported, skipped: skipped, message: `${imported} keys importadas, ${skipped} ignoradas` });
+    } catch (err) {
+      console.error('[ADMIN] Erro ao importar keys:', err.message);
+      res.json({ success: false, message: 'Database error' });
+    }
+  });
 
 // DELETE /admin/keys - Deletar todas as keys
 app.delete('/admin/keys', authAdmin, async (req, res) => {
@@ -910,7 +1075,7 @@ app.post('/admin/keys/:id/extend', authAdmin, async (req, res) => {
 // ============================================================
 app.get('/admin/logs', authAdmin, async (req, res) => {
   try {
-  const { page = 1, limit = 100, action } = req.query;
+  const { page = 1, limit = 100, action, app_id } = req.query;
   const offset = (page - 1) * limit;
 
   let query = 'SELECT * FROM logs WHERE 1=1';
@@ -919,6 +1084,25 @@ app.get('/admin/logs', authAdmin, async (req, res) => {
   const countParams = [];
   let paramIndex = 1;
   let countParamIndex = 1;
+
+  // Filtrar por app_id — busca keys do app e filtra logs que referenciem essas keys
+  if (app_id) {
+    const keyRows = (await pool.query('SELECT key FROM license_keys WHERE app_id = $1', [app_id])).rows;
+    if (keyRows.length > 0) {
+      const keyPatterns = keyRows.map(k => `%${k.key}%`);
+      const keyConditions = keyPatterns.map((_, i) => `details LIKE $${paramIndex + i}`).join(' OR ');
+      query += ` AND (${keyConditions})`;
+      const keyCountConditions = keyPatterns.map((_, i) => `details LIKE $${countParamIndex + i}`).join(' OR ');
+      countQuery += ` AND (${keyCountConditions})`;
+      params.push(...keyPatterns);
+      countParams.push(...keyPatterns);
+      paramIndex += keyPatterns.length;
+      countParamIndex += keyPatterns.length;
+    } else {
+      // App não tem keys — retorna vazio
+      return res.json({ success: true, logs: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
+    }
+  }
 
   if (action) {
     query += ` AND action LIKE $${paramIndex++}`;

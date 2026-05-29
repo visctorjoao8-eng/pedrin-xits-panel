@@ -328,7 +328,13 @@ body::before {
 .btn-sm { padding: 6px 14px; font-size: 12px; border-radius: var(--radius-sm); }
 .btn-full { width: 100%; }
 
-.spinner { animation: spin .8s linear infinite; }
+.spinner {
+  width: 32px; height: 32px;
+  border: 3px solid rgba(255,255,255,0.08);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ============================================================
@@ -1043,3 +1049,104 @@ tbody tr:hover td { background: rgba(99,102,241,0.04); }
   /* Modal fullscreen-ish */
   .modal { max-width: 95vw; width: 100%; }
 }
+
+/* ============================================================
+   APP PICKER — Escolha inicial de aplicativo
+   ============================================================ */
+.app-picker-wrap {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 70vh; padding: 40px 24px;
+}
+.app-picker-header { text-align: center; margin-bottom: 40px; }
+.app-picker-header h2 { font-size: 24px; font-weight: 700; margin-top: 16px; }
+.app-picker-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px; width: 100%; max-width: 640px;
+}
+.app-picker-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  padding: 28px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all .2s;
+}
+.app-picker-card:hover {
+  background: rgba(99,102,241,0.08);
+  border-color: rgba(99,102,241,0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(99,102,241,0.12);
+}
+.app-picker-icon {
+  width: 56px; height: 56px;
+  background: rgba(99,102,241,0.1);
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 16px;
+  color: var(--accent);
+}
+.app-picker-name { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+.app-picker-count { font-size: 12px; color: var(--text-muted); }
+
+/* ============================================================
+   APP SELECTOR — Top bar dropdown
+   ============================================================ */
+.app-selector-bar {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(5, 5, 7, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 0 24px;
+  height: 52px;
+  display: flex; align-items: center;
+}
+.app-selector-bar .app-trigger {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 13px; font-weight: 500;
+  transition: all .15s;
+  user-select: none;
+}
+.app-selector-bar .app-trigger:hover {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.14);
+}
+.app-selector-bar .app-trigger svg:first-child { color: var(--accent); }
+.app-selector-bar .app-trigger svg:last-child { opacity: 0.5; margin-left: 4px; }
+.app-selector-bar { position: relative; }
+.app-selector-bar .app-dropdown {
+  display: none;
+  position: absolute;
+  top: 44px; left: 24px;
+  min-width: 240px;
+  background: #13131a;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  overflow: hidden;
+  animation: dropIn .15s ease-out;
+}
+.app-selector-bar.open .app-dropdown { display: block; }
+@keyframes dropIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.app-opt {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: background .12s;
+}
+.app-opt:hover { background: rgba(99,102,241,0.1); color: var(--text-primary); }
+.app-opt.sel { background: rgba(99,102,241,0.12); color: var(--accent); font-weight: 500; }
+.app-opt.sel::after { content: '●'; font-size: 8px; }
+.app-opt small { font-size: 11px; color: var(--text-muted); margin-left: 12px; }

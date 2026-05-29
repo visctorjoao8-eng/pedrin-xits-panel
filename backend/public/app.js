@@ -5,6 +5,105 @@ let token = localStorage.getItem('admin_token') || '';
 let currentPage = 'dashboard';
 let keysPage = 1;
 let logsPage = 1;
+let currentApp = null; // { id, name, owner_id, app_secret }
+let allApps = [];
+
+// App selection helpers
+async function fetchApps() {
+  var data = await api('GET', '/admin/apps');
+  if (data && data.success) {
+    allApps = data.apps || [];
+  } else {
+    allApps = [];
+  }
+  return allApps;
+}
+
+async function initAppSelection() {
+  await fetchApps();
+  // Se só existe 1 app, seleciona automaticamente
+  if (allApps.length === 1) {
+    currentApp = allApps[0];
+  } else if (allApps.length > 1) {
+    // Tenta restaurar do localStorage
+    var savedId = localStorage.getItem('current_app_id');
+    if (savedId) {
+      for (var i = 0; i < allApps.length; i++) {
+        if (allApps[i].id === savedId) { currentApp = allApps[i]; break; }
+      }
+    }
+    // Se nao restaurou e tem o default, seleciona
+    if (!currentApp) {
+      for (var j = 0; j < allApps.length; j++) {
+        if (allApps[j].id === '00000000-0000-0000-0000-000000000001') { currentApp = allApps[j]; break; }
+      }
+    }
+    // Se ainda nao, seleciona o primeiro
+    if (!currentApp && allApps.length > 0) {
+      currentApp = allApps[0];
+    }
+  }
+  renderAppSelector();
+}
+
+function selectApp(app) {
+  currentApp = app;
+  if (app) localStorage.setItem('current_app_id', app.id);
+  else localStorage.removeItem('current_app_id');
+
+  // Se saiu do app (selecionou "Todos"), volta pro dashboard
+  if (!app && currentPage !== 'apps' && currentPage !== 'dashboard') {
+    currentPage = 'dashboard';
+  }
+
+  renderAppSelector();
+
+  // Recarrega a pagina atual com o novo app
+  if (currentPage === 'dashboard') loadDashboard();
+  else if (currentPage === 'keys') loadKeys(1);
+  else if (currentPage === 'logs') loadLogs(1);
+}
+
+function renderAppSelector() {
+  var el = document.getElementById('appSelector');
+  if (!el) return;
+  var label = currentApp ? esc(currentApp.name) : 'Todos os Apps';
+  var items = '';
+  // Opcao "Todos"
+  items += '<div class="app-opt' + (currentApp === null ? ' sel' : '') + '" data-app-id=""><span>Todos os Apps</span></div>';
+  // Lista de apps
+  for (var i = 0; i < allApps.length; i++) {
+    var isSel = currentApp && allApps[i].id === currentApp.id;
+    items += '<div class="app-opt' + (isSel ? ' sel' : '') + '" data-app-id="' + allApps[i].id + '"><span>' + esc(allApps[i].name) + '</span><small>' + (allApps[i].key_count || 0) + ' keys</small></div>';
+  }
+  el.innerHTML = '<div class="app-trigger" id="appSelTrigger">' +
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' +
+    '<span>' + label + '</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>' +
+    '</div>' +
+    '<div class="app-dropdown" id="appSelDrop">' + items + '</div>';
+  // Toggle dropdown
+  document.getElementById('appSelTrigger').addEventListener('click', function (e) {
+    e.stopPropagation();
+    el.classList.toggle('open');
+  });
+  // Fechar ao clicar fora
+  document.addEventListener('click', function () { el.classList.remove('open'); });
+  // Click nos itens
+  var opts = el.querySelectorAll('.app-opt');
+  for (var j = 0; j < opts.length; j++) {
+    opts[j].addEventListener('click', function (e) {
+      e.stopPropagation();
+      var appId = this.getAttribute('data-app-id');
+      if (appId === '') { selectApp(null); }
+      else {
+        for (var k = 0; k < allApps.length; k++) {
+          if (allApps[k].id === appId) { selectApp(allApps[k]); break; }
+        }
+      }
+      el.classList.remove('open');
+    });
+  }
+}
 
 // URL do backend - detecta automaticamente
 const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
@@ -161,25 +260,6 @@ function toggleSidebar() {
 }
 
 // ============================================================
-//  Desktop Sidebar Collapse Toggle
-// ============================================================
-function toggleSidebarCollapse() {
-  var sidebar = document.getElementById('sidebar');
-  sidebar.classList.toggle('collapsed');
-  var isCollapsed = sidebar.classList.contains('collapsed');
-  localStorage.setItem('sidebar_collapsed', isCollapsed ? '1' : '0');
-}
-
-// Restaurar estado da sidebar ao carregar
-(function restoreSidebarState() {
-  var collapsed = localStorage.getItem('sidebar_collapsed');
-  if (collapsed === '1') {
-    var sidebar = document.getElementById('sidebar');
-    if (sidebar) sidebar.classList.add('collapsed');
-  }
-})();
-
-// ============================================================
 //  Auth
 // ============================================================
 function showLogin() {
@@ -190,7 +270,41 @@ function showLogin() {
 function showApp() {
   document.getElementById('loginPage').style.display = 'none';
   document.getElementById('appContainer').style.display = 'block';
-  navigateTo('dashboard');
+  initAppSelection().then(function () {
+    // Se so existe 1 app, vai direto pro dashboard
+    if (allApps.length <= 1) {
+      if (allApps.length === 1) selectApp(allApps[0]);
+      else selectApp(null);
+      navigateTo('dashboard');
+    } else {
+      // Mais de 1 app: mostra tela de escolha
+      showAppPicker();
+    }
+  });
+}
+
+function showAppPicker() {
+  var c = document.getElementById('contentArea');
+  var html = '<div class="app-picker-wrap">';
+  html += '<div class="app-picker-header">';
+  html += '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
+  html += '<h2>Escolha um Aplicativo</h2>';
+  html += '<p style="color:var(--text-secondary);margin-top:8px">Selecione o aplicativo para gerenciar</p>';
+  html += '</div>';
+  html += '<div class="app-picker-grid">';
+  for (var i = 0; i < allApps.length; i++) {
+    var a = allApps[i];
+    html += '<div class="app-picker-card" onclick="selectApp(allApps[' + i + ']); navigateTo(\'dashboard\');">';
+    html += '<div class="app-picker-icon">';
+    html += '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
+    html += '</div>';
+    html += '<div class="app-picker-name">' + esc(a.name) + '</div>';
+    html += '<div class="app-picker-count">' + (a.key_count || 0) + ' keys</div>';
+    html += '</div>';
+  }
+  html += '</div>'; // grid
+  html += '</div>'; // wrap
+  c.innerHTML = html;
 }
 
 async function doLogin() {
@@ -248,10 +362,7 @@ document.getElementById('loginUser').addEventListener('keypress', function (e) {
 // Event listeners para elementos que tinham onclick inline
 document.getElementById('loginBtn').addEventListener('click', function () { doLogin(); });
 document.getElementById('logoutBtn').addEventListener('click', function () { doLogout(); });
-document.getElementById('sidebarToggle').addEventListener('click', function () { toggleSidebarCollapse(); });
-document.getElementById('hamburgerBtn').addEventListener('click', function () { toggleSidebar(); });
-var importBtn = document.getElementById('importKeysBtn');
-if (importBtn) importBtn.addEventListener('click', function () { showImportKeysModal(); });
+document.getElementById('sidebarToggle').addEventListener('click', function () { toggleSidebar(); });
 
 // Navegação da sidebar via data-nav
 var navItems = document.querySelectorAll('[data-nav]');
@@ -273,14 +384,35 @@ document.getElementById('sidebarOverlay').addEventListener('click', function () 
   toggleSidebar();
 });
 
+// Botão de importar keys
+var importBtn = document.getElementById('importKeysBtn');
+if (importBtn) importBtn.addEventListener('click', function () { showImportKeysModal(); });
+
+function showNoAppScreen() {
+  var c = document.getElementById('contentArea');
+  c.innerHTML =
+    '<div class="app-picker-wrap">' +
+    '<div class="app-picker-header">' +
+    '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' +
+    '<h2>Nenhum Aplicativo</h2>' +
+    '<p style="color:var(--text-secondary);margin-top:8px">Crie um aplicativo para começar</p>' +
+    '</div>' +
+    '<button class="btn btn-primary" onclick="showCreateAppModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Criar Primeiro App</button>' +
+    '</div>';
+}
+
 // ============================================================
 //  Navigation
 // ============================================================
+var _navLock = false;
 function navigateTo(page) {
+  if (_navLock) return;
+  _navLock = true;
+  setTimeout(function () { _navLock = false; }, 500);
   currentPage = page;
   var items = document.querySelectorAll('.nav-item');
   for (var i = 0; i < items.length; i++) {
-    items[i].classList.toggle('active', items[i].getAttribute('data-page') === page);
+    items[i].classList.toggle('active', items[i].getAttribute('data-nav') === page);
   }
 
   var sidebar = document.getElementById('sidebar');
@@ -295,19 +427,160 @@ function navigateTo(page) {
   content.offsetHeight;
   content.style.animation = '';
 
+  // Se não tem app selecionado e tem mais de 1, mostra picker (exceto pra apps)
+  if (!currentApp && allApps.length > 1 && page !== 'apps') {
+    if (page !== 'dashboard') currentPage = page; // salva pagina desejada
+    showAppPicker();
+    return;
+  }
+
+  // Se nenhum app existe ainda e nao e tela de apps, mostra picker
+  if (!currentApp && allApps.length === 0 && page !== 'apps') {
+    currentPage = page;
+    showNoAppScreen();
+    return;
+  }
+
   if (page === 'dashboard') loadDashboard();
   else if (page === 'keys') loadKeys(1);
   else if (page === 'logs') loadLogs(1);
+  else if (page === 'apps') loadApps();
+}
+
+// ============================================================
+//  APPS - Gerenciamento de Aplicativos
+// ============================================================
+async function loadApps() {
+  var c = document.getElementById('contentArea');
+  c.innerHTML = '<div class="page-header"><h2>Aplicativos</h2></div><div style="display:flex;align-items:center;justify-content:center;padding:80px;color:var(--text-muted)"><div class="spinner"></div></div>';
+
+  var data = await api('GET', '/admin/apps');
+  if (!data || !data.success) {
+    c.innerHTML = '<div class="page-header"><h2>Aplicativos</h2></div><div style="text-align:center;padding:60px;color:var(--text-muted)"><p>Não foi possível carregar os aplicativos.</p><button class="btn btn-ghost" onclick="loadApps()">Tentar novamente</button></div>';
+    return;
+  }
+
+  var apps = data.apps || [];
+
+  var rows = '';
+  if (apps.length === 0) {
+    rows = '<tr><td colspan="5" style="text-align:center;padding:48px;color:var(--text-muted)">' +
+      '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 12px;display:block;opacity:.4"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' +
+      'Nenhum aplicativo cadastrado</td></tr>';
+  } else {
+    for (var i = 0; i < apps.length; i++) {
+      var a = apps[i];
+      var isDefault = a.id === '00000000-0000-0000-0000-000000000001';
+      var deleteBtn = isDefault ?
+        '<span style="color:var(--text-muted);font-size:12px">Padrão</span>' :
+        '<button class="btn btn-ghost btn-sm" onclick="deleteApp(\'' + a.id + '\',\'' + esc(a.name.replace(/'/g, "\\'")) + '\')" title="Deletar"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>';
+      rows += '<tr>' +
+        '<td><strong>' + esc(a.name) + '</strong></td>' +
+        '<td><code style="font-size:11px;background:rgba(255,255,255,0.04);padding:3px 8px;border-radius:4px">' + esc(a.owner_id) + '</code></td>' +
+        '<td><code style="font-size:11px;background:rgba(255,255,255,0.04);padding:3px 8px;border-radius:4px;word-break:break-all">' + esc(a.app_secret) + '</code></td>' +
+        '<td>' + (a.key_count || 0) + '</td>' +
+        '<td>' + fmtDate(a.created_at) + '</td>' +
+        '<td><div class="action-btns">' + deleteBtn + '</div></td>' +
+        '</tr>';
+    }
+  }
+
+  c.innerHTML = '<div class="page-header"><h2>Aplicativos</h2><div class="actions">' +
+    '<button class="btn btn-primary" onclick="showCreateAppModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Criar App</button></div></div>' +
+    '<div class="table-container">' +
+    '<div style="overflow-x:auto"><table><thead><tr><th>Nome</th><th>Owner ID</th><th>Secret</th><th>Keys</th><th>Criado</th><th>Ações</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '</div>';
+}
+
+function showCreateAppModal() {
+  openModal(
+    '<h3>Criar Aplicativo</h3>' +
+    '<div class="form-group"><label>Nome do Aplicativo</label><input type="text" id="appNameInput" placeholder="Ex: Meu App"></div>' +
+    '<div class="form-group"><label>Owner ID <span style="color:var(--text-muted);font-size:12px">(opcional, gerado automaticamente)</span></label><input type="text" id="appOwnerInput" placeholder="UUID ou vazio para auto"></div>' +
+    '<div id="appCreateResult"></div>' +
+    '<div class="modal-actions"><button class="btn btn-ghost" id="appCancelBtn">Cancelar</button><button class="btn btn-primary" id="appCreateBtn">Criar</button></div>'
+  );
+  setTimeout(function () {
+    document.getElementById('appCancelBtn').addEventListener('click', function () { closeModal(); });
+    document.getElementById('appCreateBtn').addEventListener('click', function () { doCreateApp(); });
+  }, 50);
+}
+
+async function doCreateApp() {
+  var name = document.getElementById('appNameInput').value.trim();
+  var ownerId = document.getElementById('appOwnerInput').value.trim();
+
+  if (!name) { showToast('Nome é obrigatório.', 'error'); return; }
+
+  var body = { name: name };
+  if (ownerId) body.owner_id = ownerId;
+
+  var data = await api('POST', '/admin/apps', body);
+  if (!data || !data.success) {
+    showToast(data ? data.message : 'Erro ao criar.', 'error');
+    return;
+  }
+
+  closeModal();
+  showToast('Aplicativo criado com sucesso!', 'success');
+  await fetchApps();
+  if (!currentApp) selectApp(data.app);
+  renderAppSelector();
+  loadApps();
+}
+
+async function deleteApp(id, name) {
+  showConfirm('Deletar Aplicativo', 'Deseja deletar "' + name + '"? As keys deste app serão desassociadas.', function () {
+    api('DELETE', '/admin/apps/' + id).then(async function (data) {
+      if (data && data.success) {
+        showToast(data.message, 'success');
+        await fetchApps();
+        // Se deletou o app selecionado, troca pro primeiro disponível
+        if (currentApp && currentApp.id === id) {
+          currentApp = allApps.length > 0 ? allApps[0] : null;
+        }
+        renderAppSelector();
+        loadApps();
+      } else {
+        showToast(data ? data.message : 'Erro ao deletar.', 'error');
+      }
+    });
+  });
 }
 
 // ============================================================
 //  DASHBOARD
 // ============================================================
 async function loadDashboard() {
-  var data = await api('GET', '/admin/dashboard');
-  if (!data || !data.success) return;
-  var s = data.stats;
   var c = document.getElementById('contentArea');
+  var appLabel = currentApp ? ' — ' + esc(currentApp.name) : '';
+  c.innerHTML = '<div class="page-header"><h2>Dashboard' + appLabel + '</h2></div><div style="display:flex;align-items:center;justify-content:center;padding:80px;color:var(--text-muted)"><div class="spinner"></div></div>';
+
+  // Busca keys filtradas por app (se tiver selecionado) para stats
+  var keysUrl = '/admin/keys?page=1&limit=9999';
+  if (currentApp) keysUrl += '&app_id=' + currentApp.id;
+  var keysData = await api('GET', keysUrl);
+
+  // Busca logs recentes
+  var data = await api('GET', '/admin/dashboard');
+  if (!data || !data.success) {
+    c.innerHTML = '<div class="page-header"><h2>Dashboard' + appLabel + '</h2></div><div style="text-align:center;padding:60px;color:var(--text-muted)"><p>Não foi possível carregar o dashboard.</p><button class="btn btn-ghost" onclick="loadDashboard()">Tentar novamente</button></div>';
+    return;
+  }
+
+  // Calcula stats por app localmente
+  var s = { total_keys: 0, active_keys: 0, unused_keys: 0, expired_keys: 0, banned_keys: 0, paused_keys: 0 };
+  if (keysData && keysData.success && keysData.keys) {
+    for (var k = 0; k < keysData.keys.length; k++) {
+      var kr = keysData.keys[k];
+      s.total_keys++;
+      if (kr.status === 'active' && !kr.paused) s.active_keys++;
+      else if (kr.status === 'unused') s.unused_keys++;
+      else if (kr.status === 'expired') s.expired_keys++;
+      else if (kr.status === 'banned') s.banned_keys++;
+      if (kr.paused) s.paused_keys++;
+    }
+  }
 
   var statIcons = {
     total: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>',
@@ -315,7 +588,8 @@ async function loadDashboard() {
     unused: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
     expired: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
     banned: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>',
-    paused: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>'
+    paused: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>',
+    apps: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>'
   };
 
   function statCard(icon, label, value, cls) {
@@ -355,21 +629,29 @@ async function loadDashboard() {
 // ============================================================
 async function loadKeys(page) {
   if (page) keysPage = page;
+  var c = document.getElementById('contentArea');
+  var appLabel = currentApp ? ' — ' + esc(currentApp.name) : '';
+  c.innerHTML = '<div class="page-header"><h2>Licenças' + appLabel + '</h2></div><div style="display:flex;align-items:center;justify-content:center;padding:80px;color:var(--text-muted)"><div class="spinner"></div></div>';
+
   var sf = (document.getElementById('keyStatusFilter') || {}).value || '';
   var search = (document.getElementById('keySearch') || {}).value || '';
 
   var url = '/admin/keys?page=' + keysPage + '&limit=25';
+  if (currentApp) url += '&app_id=' + currentApp.id;
+  else url += '&app_id=__none__'; // sem app = keys órfãs
   if (sf) url += '&status=' + sf;
   if (search) url += '&search=' + encodeURIComponent(search);
 
   var data = await api('GET', url);
-  if (!data || !data.success) return;
+  if (!data || !data.success) {
+    c.innerHTML = '<div class="page-header"><h2>Licenças</h2></div><div style="text-align:center;padding:60px;color:var(--text-muted)"><p>Não foi possível carregar as licenças.</p><button class="btn btn-ghost" onclick="loadKeys(1)">Tentar novamente</button></div>';
+    return;
+  }
 
-  var c = document.getElementById('contentArea');
   var rows = '';
 
   if (data.keys.length === 0) {
-    rows = '<tr><td colspan="3" style="text-align:center;padding:48px;color:var(--text-muted)">' +
+    rows = '<tr><td colspan="8" style="text-align:center;padding:48px;color:var(--text-muted)">' +
       '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 12px;display:block;opacity:.4"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' +
       'Nenhuma key encontrada</td></tr>';
   } else {
@@ -407,11 +689,11 @@ async function loadKeys(page) {
       rows += '<tr>' +
         '<td><span class="key-text" onclick="copyKey(\'' + esc(k.key) + '\')" title="Clique para copiar">' + esc(k.key) + '</span></td>' +
         '<td><span class="badge badge-' + statusBadge + '">' + statusLabel + '</span></td>' +
-        '<td class="mobile-hide">' + esc(k.client_name || '—') + '</td>' +
-        '<td class="mobile-hide">' + durationLabel + '</td>' +
-        '<td class="mobile-hide"><span class="hwid-text">' + hwid + '</span></td>' +
-        '<td class="mobile-hide">' + fmtDate(k.created_at) + '</td>' +
-        '<td class="mobile-hide">' + (k.expires_at ? fmtDate(k.expires_at) : (k.is_lifetime ? 'Nunca' : '—')) + '</td>' +
+        '<td>' + esc(k.client_name || '—') + '</td>' +
+        '<td>' + durationLabel + '</td>' +
+        '<td><span class="hwid-text">' + hwid + '</span></td>' +
+        '<td>' + fmtDate(k.created_at) + '</td>' +
+        '<td>' + (k.expires_at ? fmtDate(k.expires_at) : (k.is_lifetime ? 'Nunca' : '—')) + '</td>' +
         '<td><div class="action-btns">' + btns + '</div></td></tr>';
     }
   }
@@ -420,16 +702,14 @@ async function loadKeys(page) {
 
   c.innerHTML = '<div class="page-header"><h2>Licenças</h2><div class="actions">' +
     '<button class="btn btn-ghost btn-sm" onclick="togglePauseAll()" id="pauseAllBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pausar Todas</button>' +
-    '<button class="btn btn-ghost btn-sm" onclick="exportKeys()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Exportar .TXT</button>' +
     '<button class="btn btn-ghost btn-sm" id="importKeysBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Importar .TXT</button>' +
-    '<button class="btn btn-danger btn-sm" onclick="deleteAllKeys()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg> Deletar Todas</button>' +
     '<button class="btn btn-primary" onclick="showCreateKeysModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Gerar Keys</button></div></div>' +
     '<div class="table-container">' +
     '<div class="table-toolbar"><div class="search-box">' +
     '<input type="text" id="keySearch" placeholder="Buscar key..." value="' + esc(search) + '" onkeypress="if(event.key===\'Enter\')loadKeys(1)">' +
     '<select id="keyStatusFilter" onchange="loadKeys(1)"><option value="">Todos Status</option><option value="unused"' + (sf === 'unused' ? ' selected' : '') + '>Não Usada</option><option value="active"' + (sf === 'active' ? ' selected' : '') + '>Ativa</option><option value="expired"' + (sf === 'expired' ? ' selected' : '') + '>Expirada</option><option value="banned"' + (sf === 'banned' ? ' selected' : '') + '>Banida</option></select>' +
     '</div><button class="btn btn-ghost btn-sm" onclick="loadKeys(' + keysPage + ')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></div>' +
-    '<div style="overflow-x:auto"><table><thead><tr><th>Key</th><th>Status</th><th class="mobile-hide">Client</th><th class="mobile-hide">Duração</th><th class="mobile-hide">HWID</th><th class="mobile-hide">Criada</th><th class="mobile-hide">Expira</th><th>Ações</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div style="overflow-x:auto"><table><thead><tr><th>Key</th><th>Status</th><th>Client</th><th>Duração</th><th>HWID</th><th>Criada</th><th>Expira</th><th>Ações</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
     '<div class="table-footer">' + pag + '</div></div>';
 
   // Atualizar estado do botão pausar todas
@@ -450,7 +730,7 @@ async function checkPauseAllState() {
 
 function showCreateKeysModal() {
   openModal(
-    '<h3>Gerar Keys</h3>' +
+    '<h3>Gerar Keys' + (currentApp ? ' — ' + esc(currentApp.name) : '') + '</h3>' +
     '<div class="form-group"><label>Quantidade</label><input type="number" id="mkCount" value="1" min="1" max="100"></div>' +
     '<div class="form-group"><label>Nome do Client</label><input type="text" id="mkClientName" placeholder="Opcional (ex: GELADO)"></div>' +
     '<div class="form-group"><label>Duração</label><select id="mkDurationType"><option value="days">Diário (em dias)</option><option value="lifetime">Lifetime</option></select></div>' +
@@ -479,6 +759,7 @@ async function createKeys() {
 
   var body = { count: count, duration_type: durationType, client_name: clientName };
   if (durationType === 'days') body.duration_days = duration;
+  if (currentApp) body.app_id = currentApp.id;
 
   var data = await api('POST', '/admin/keys', body);
   if (!data || !data.success) {
@@ -656,65 +937,6 @@ async function processImport() {
   loadKeys(1);
 }
 
-async function exportKeys() {
-  var sf = (document.getElementById('keyStatusFilter') || {}).value || '';
-  var search = (document.getElementById('keySearch') || {}).value || '';
-
-  var url = '/admin/keys?page=1&limit=9999';
-  if (sf) url += '&status=' + sf;
-  if (search) url += '&search=' + encodeURIComponent(search);
-
-  var data = await api('GET', url);
-  if (!data || !data.success) {
-    showToast('Erro ao exportar keys.', 'error');
-    return;
-  }
-
-  if (data.keys.length === 0) {
-    showToast('Nenhuma key para exportar.', 'info');
-    return;
-  }
-
-  var lines = [];
-  lines.push('========================================');
-  lines.push('  PEDRIN XITS - Exportação de Keys');
-  lines.push('  Data: ' + new Date().toLocaleString('pt-BR'));
-  lines.push('  Total: ' + data.keys.length + ' keys');
-  lines.push('========================================');
-  lines.push('');
-
-  for (var i = 0; i < data.keys.length; i++) {
-    var k = data.keys[i];
-    var statusLabel = k.paused ? 'paused' : k.status;
-    var durationLabel = k.is_lifetime ? 'LIFETIME' : k.duration_days + 'd';
-    var clientLabel = k.client_name || '-';
-    var expiresLabel = k.expires_at ? k.expires_at : (k.is_lifetime ? 'Nunca' : '-');
-
-    lines.push('Key: ' + k.key);
-    lines.push('Status: ' + statusLabel);
-    lines.push('Client: ' + clientLabel);
-    lines.push('Duração: ' + durationLabel);
-    lines.push('HWID: ' + (k.hwid || '-'));
-    lines.push('Criada: ' + (k.created_at || '-'));
-    lines.push('Expira: ' + expiresLabel);
-    lines.push('Ativada: ' + (k.activated_at || '-'));
-    lines.push('----------------------------------------');
-  }
-
-  var text = lines.join('\n');
-  var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-  var url2 = URL.createObjectURL(blob);
-  var a = document.createElement('a');
-  a.href = url2;
-  a.download = 'pedrin-xits-keys-' + new Date().toISOString().slice(0, 10) + '.txt';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url2);
-
-  showToast(data.keys.length + ' keys exportadas!', 'success');
-}
-
 async function deleteKey(id) {
   showConfirm('Deletar Key', 'Deseja deletar esta key permanentemente? Esta ação não pode ser desfeita.', function () {
     api('DELETE', '/admin/keys/' + id).then(function (data) {
@@ -724,35 +946,29 @@ async function deleteKey(id) {
   });
 }
 
-async function deleteAllKeys() {
-  showConfirm('Deletar Todas as Keys', 'ATENÇÃO: Isso vai deletar TODAS as keys e TODOS os logs permanentemente. Esta ação NÃO pode ser desfeita!', function () {
-    api('DELETE', '/admin/keys').then(function (data) {
-      if (data && data.success) {
-        showToast(data.message, 'success');
-        loadKeys(1);
-      } else {
-        showToast(data ? data.message : 'Erro', 'error');
-      }
-    });
-  });
-}
-
 // ============================================================
 //  LOGS
 // ============================================================
 async function loadLogs(page) {
   if (page) logsPage = page;
+  var c = document.getElementById('contentArea');
+  var appLabel = currentApp ? ' — ' + esc(currentApp.name) : '';
+  c.innerHTML = '<div class="page-header"><h2>Logs' + appLabel + '</h2></div><div style="display:flex;align-items:center;justify-content:center;padding:80px;color:var(--text-muted)"><div class="spinner"></div></div>';
+
   var action = (document.getElementById('logActionFilter') || {}).value || '';
   var search = (document.getElementById('logSearch') || {}).value || '';
 
   var url = '/admin/logs?page=' + logsPage + '&limit=50';
+  if (currentApp) url += '&app_id=' + currentApp.id;
   if (action) url += '&action=' + action;
   if (search) url += '&search=' + encodeURIComponent(search);
 
   var data = await api('GET', url);
-  if (!data || !data.success) return;
+  if (!data || !data.success) {
+    c.innerHTML = '<div class="page-header"><h2>Logs</h2></div><div style="text-align:center;padding:60px;color:var(--text-muted)"><p>Não foi possível carregar os logs.</p><button class="btn btn-ghost" onclick="loadLogs(1)">Tentar novamente</button></div>';
+    return;
+  }
 
-  var c = document.getElementById('contentArea');
   var logsHtml = '';
 
   if (data.logs.length === 0) {
