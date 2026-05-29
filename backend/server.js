@@ -917,12 +917,23 @@ app.post('/admin/keys/import', authAdmin, async (req, res) => {
 // DELETE /admin/keys - Deletar todas as keys
 app.delete('/admin/keys', authAdmin, async (req, res) => {
   try {
-  const countResult = await pool.query('SELECT COUNT(*) as count FROM license_keys');
-  const count = countResult.rows[0].count;
-  await pool.query('DELETE FROM license_keys');
-  await pool.query('DELETE FROM logs');
-  await addLog('keys_deleted_all', `All ${count} keys deleted`, req.ip);
-  res.json({ success: true, message: `${count} keys deleted`, count: parseInt(count) });
+    const { app_id } = req.query;
+    let count, result;
+
+    if (app_id) {
+      // Deletar apenas keys de um app especifico
+      count = (await pool.query('SELECT COUNT(*) as count FROM license_keys WHERE app_id = $1', [app_id])).rows[0].count;
+      result = await pool.query('DELETE FROM license_keys WHERE app_id = $1', [app_id]);
+      await addLog('keys_deleted_all', `Deleted ${count} keys from app ${app_id}`, req.ip);
+    } else {
+      // Deletar TODAS as keys
+      count = (await pool.query('SELECT COUNT(*) as count FROM license_keys')).rows[0].count;
+      await pool.query('DELETE FROM license_keys');
+      await pool.query('DELETE FROM logs');
+      await addLog('keys_deleted_all', `All ${count} keys deleted`, req.ip);
+    }
+
+    res.json({ success: true, message: `${count} keys deleted`, count: parseInt(count) });
   } catch (err) {
     console.error('[ADMIN] Erro ao deletar todas keys:', err.message);
     res.json({ success: false, message: 'Database error' });

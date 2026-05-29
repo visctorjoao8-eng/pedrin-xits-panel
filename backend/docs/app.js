@@ -384,9 +384,7 @@ document.getElementById('sidebarOverlay').addEventListener('click', function () 
   toggleSidebar();
 });
 
-// Botão de importar keys
-var importBtn = document.getElementById('importKeysBtn');
-if (importBtn) importBtn.addEventListener('click', function () { showImportKeysModal(); });
+// Botão de importar keys - evento registrado via onclick inline no render
 
 function showNoAppScreen() {
   var c = document.getElementById('contentArea');
@@ -700,9 +698,11 @@ async function loadKeys(page) {
 
   var pag = pagination(keysPage, data.total, 25, 'loadKeys');
 
-  c.innerHTML = '<div class="page-header"><h2>Licenças</h2><div class="actions">' +
+  c.innerHTML = '<div class="page-header"><h2>Licenças' + appLabel + '</h2><div class="actions">' +
     '<button class="btn btn-ghost btn-sm" onclick="togglePauseAll()" id="pauseAllBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pausar Todas</button>' +
-    '<button class="btn btn-ghost btn-sm" id="importKeysBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Importar .TXT</button>' +
+    '<button class="btn btn-ghost btn-sm" onclick="exportKeys()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Exportar .TXT</button>' +
+    '<button class="btn btn-ghost btn-sm" onclick="showImportKeysModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Importar .TXT</button>' +
+    '<button class="btn btn-danger btn-sm" onclick="deleteAllKeys()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg> Deletar Todas</button>' +
     '<button class="btn btn-primary" onclick="showCreateKeysModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Gerar Keys</button></div></div>' +
     '<div class="table-container">' +
     '<div class="table-toolbar"><div class="search-box">' +
@@ -714,6 +714,46 @@ async function loadKeys(page) {
 
   // Atualizar estado do botão pausar todas
   checkPauseAllState();
+}
+
+function exportKeys() {
+  var appFilter = currentApp ? ('&app_id=' + currentApp.id) : '';
+  api('GET', '/admin/keys?page=1&limit=9999' + appFilter).then(function (data) {
+    if (!data || !data.success) { showToast('Erro ao exportar.', 'error'); return; }
+    var keys = data.keys || [];
+    if (keys.length === 0) { showToast('Nenhuma key para exportar.', 'info'); return; }
+    var now = new Date().toISOString().split('T')[0];
+    var content = '=== ' + (currentApp ? currentApp.name : 'Todos os Apps') + ' - Exportado em ' + now + ' ===\r\n';
+    content += '=== Total: ' + keys.length + ' keys ===\r\n\r\n';
+    for (var i = 0; i < keys.length; i++) {
+      content += 'Key: ' + keys[i].key + '\r\n';
+      content += 'Status: ' + keys[i].status + '\r\n';
+      content += 'Client: ' + (keys[i].client_name || '') + '\r\n';
+      content += 'Criado: ' + keys[i].created_at + '\r\n';
+      content += '---\r\n';
+    }
+    var blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'keys_' + (currentApp ? currentApp.name.toLowerCase().replace(/\s+/g, '_') : 'todos') + '_' + now + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(keys.length + ' keys exportadas!', 'success');
+  });
+}
+
+function deleteAllKeys() {
+  var scope = currentApp ? 'do app "' + currentApp.name + '"' : 'de TODOS os apps';
+  showConfirm('Deletar Todas as Keys', 'Deseletar todas as keys ' + scope + '? Esta ação não pode ser desfeita.', function () {
+    var url = currentApp ? '/admin/keys?app_id=' + currentApp.id : '/admin/keys';
+    api('DELETE', url).then(function (data) {
+      if (data && data.success) { showToast(data.message, 'success'); loadKeys(1); }
+      else showToast(data ? data.message : 'Erro', 'error');
+    });
+  });
 }
 
 async function checkPauseAllState() {
@@ -917,7 +957,9 @@ async function processImport() {
   document.getElementById('importSubmitBtn').disabled = true;
   document.getElementById('importSubmitBtn').textContent = 'Importando...';
 
-  var data = await api('POST', '/admin/keys/import', { keys: keys });
+  var body = { keys: keys };
+  if (currentApp) body.app_id = currentApp.id;
+  var data = await api('POST', '/admin/keys/import', body);
 
   if (!data || !data.success) {
     document.getElementById('importSubmitBtn').disabled = false;
