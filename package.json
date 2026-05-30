@@ -5,5 +5,8 @@
   "scripts": {
     "dev": "cd backend && npm run dev",
     "start": "cd backend && npm start"
+  },
+  "dependencies": {
+    "pg": "^8.21.0"
   }
 }
