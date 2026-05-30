@@ -395,6 +395,7 @@ document.getElementById('loginUser').addEventListener('keypress', function (e) {
 document.getElementById('loginBtn').addEventListener('click', function () { doLogin(); });
 document.getElementById('logoutBtn').addEventListener('click', function () { doLogout(); });
 document.getElementById('sidebarToggle').addEventListener('click', function () { toggleSidebar(); });
+document.getElementById('sidebarHoverZone').addEventListener('click', function () { toggleSidebar(); });
 document.getElementById('mobileHamburger').addEventListener('click', function () { toggleSidebar(); });
 
 // Navegação da sidebar via data-nav

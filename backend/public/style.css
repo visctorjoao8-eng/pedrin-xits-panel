@@ -449,7 +449,7 @@ body::before {
 .logout-btn:hover { background: rgba(248,113,113,0.12); border-color: rgba(248,113,113,0.25); transform: translateX(2px); }
 
 /* ============================================================
-   SIDEBAR TOGGLE BUTTON
+   SIDEBAR TOGGLE BUTTON — visible only on hover (desktop)
    ============================================================ */
 .sidebar-toggle {
   display: flex; align-items: center; justify-content: center;
@@ -465,7 +465,24 @@ body::before {
   top: 50%;
   transform: translateY(-50%);
   z-index: 201;
-  opacity: .7;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Hover zone: invisível na borda direita da sidebar */
+.sidebar-hover-zone {
+  position: fixed;
+  top: 0; bottom: 0;
+  left: calc(var(--sidebar-w) - 6px);
+  width: 12px;
+  z-index: 200;
+  cursor: pointer;
+}
+
+.sidebar-hover-zone:hover ~ .sidebar-toggle,
+.sidebar-toggle:hover {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .sidebar-toggle:hover {
@@ -473,18 +490,22 @@ body::before {
   color: var(--accent-hover);
   border-color: rgba(99,102,241,0.3);
   width: 28px;
-  opacity: 1;
+}
+
+/* When collapsed, hover zone follows */
+.sidebar.collapsed ~ .sidebar-hover-zone {
+  left: calc(var(--sidebar-collapsed-w) - 6px);
 }
 
 .sidebar-toggle svg {
   transition: transform var(--transition);
 }
 
-.sidebar.collapsed .sidebar-toggle {
+.sidebar.collapsed + .sidebar-toggle {
   left: var(--sidebar-collapsed-w);
 }
 
-.sidebar.collapsed .sidebar-toggle svg {
+.sidebar.collapsed + .sidebar-toggle svg {
   transform: rotate(180deg);
 }
 
@@ -937,7 +958,8 @@ tbody tr:hover td { background: rgba(99,102,241,0.04); }
    RESPONSIVE
    ============================================================ */
 @media (max-width: 768px) {
-  .sidebar-toggle { display: none !important; }
+   .sidebar-toggle,
+   .sidebar-hover-zone { display: none !important; }
 
   .mobile-header { display: flex; }
   .sidebar {
@@ -955,8 +977,27 @@ tbody tr:hover td { background: rgba(99,102,241,0.04); }
   .sidebar.collapsed .nav-item::after,
   .sidebar.collapsed .logout-btn::after { display: none; }
   .sidebar.collapsed ~ .content { margin-left: 0; }
-  .sidebar.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
-  .content { margin-left: 0; padding: 76px 12px 20px; }
+   .sidebar.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
+
+   /* App selector no mobile: fluxo normal abaixo do header */
+   .app-selector-bar {
+     position: relative;
+     top: auto; margin-top: 60px;
+     padding: 0 12px;
+     height: 48px;
+     z-index: 50;
+   }
+   .app-selector-bar .app-trigger {
+     padding: 4px 10px;
+     font-size: 12px;
+   }
+   .app-selector-bar .app-dropdown {
+     left: 12px;
+     right: 12px;
+     min-width: auto;
+   }
+
+   .content { margin-left: 0; padding: 16px 12px 20px; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .page-header { flex-direction: column; align-items: flex-start; }
   .page-header h2 { font-size: 20px; }
