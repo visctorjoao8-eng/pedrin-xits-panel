@@ -449,7 +449,7 @@ body::before {
 .logout-btn:hover { background: rgba(248,113,113,0.12); border-color: rgba(248,113,113,0.25); transform: translateX(2px); }
 
 /* ============================================================
-   SIDEBAR TOGGLE BUTTON — appears on hover of right edge
+   SIDEBAR TOGGLE BUTTON
    ============================================================ */
 .sidebar-toggle {
   display: flex; align-items: center; justify-content: center;
@@ -463,10 +463,9 @@ body::before {
   position: fixed;
   left: var(--sidebar-w);
   top: 50%;
-  transform: translateY(-50%) translateX(-50%);
+  transform: translateY(-50%);
   z-index: 201;
-  opacity: 0;
-  pointer-events: none;
+  opacity: .7;
 }
 
 .sidebar-toggle:hover {
@@ -474,40 +473,19 @@ body::before {
   color: var(--accent-hover);
   border-color: rgba(99,102,241,0.3);
   width: 28px;
-}
-
-/* Hover zone: a thin invisible strip along the sidebar right edge */
-.sidebar-hover-zone {
-  position: fixed;
-  left: calc(var(--sidebar-w) - 16px);
-  top: 0;
-  bottom: 0;
-  width: 32px;
-  z-index: 201;
-  cursor: pointer;
-}
-
-.sidebar-hover-zone:hover ~ .sidebar-toggle,
-.sidebar-toggle:hover {
   opacity: 1;
-  pointer-events: auto;
-  transform: translateY(-50%) translateX(0);
 }
 
 .sidebar-toggle svg {
   transition: transform var(--transition);
 }
 
+.sidebar.collapsed .sidebar-toggle {
+  left: var(--sidebar-collapsed-w);
+}
+
 .sidebar.collapsed .sidebar-toggle svg {
   transform: rotate(180deg);
-}
-
-.sidebar.collapsed ~ .sidebar-hover-zone {
-  left: calc(var(--sidebar-collapsed-w) - 16px);
-}
-
-.sidebar.collapsed ~ .sidebar-toggle {
-  left: var(--sidebar-collapsed-w);
 }
 
 /* ============================================================
@@ -524,11 +502,6 @@ body::before {
 
 .sidebar.collapsed .brand-text {
   display: none;
-}
-
-.sidebar.collapsed .sidebar-toggle {
-  right: 50%;
-  transform: translateX(50%);
 }
 
 .sidebar.collapsed .nav-item {
@@ -635,7 +608,7 @@ body::before {
 }
 
 /* ============================================================
-   MOBILE
+   MOBILE HEADER & OVERLAY
    ============================================================ */
 .mobile-header {
   display: none; position: fixed; top: 0; left: 0; right: 0; height: 60px;
@@ -656,6 +629,7 @@ body::before {
 }
 
 .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); backdrop-filter: blur(8px); z-index: 190; }
+.sidebar-overlay.open { display: block; }
 
 /* ============================================================
    CONTENT AREA
@@ -963,11 +937,13 @@ tbody tr:hover td { background: rgba(99,102,241,0.04); }
    RESPONSIVE
    ============================================================ */
 @media (max-width: 768px) {
-  .sidebar-hover-zone,
   .sidebar-toggle { display: none !important; }
 
   .mobile-header { display: flex; }
-  .sidebar { transform: translateX(-100%); width: var(--sidebar-w) !important; }
+  .sidebar {
+    transform: translateX(-100%); width: var(--sidebar-w) !important;
+    transition: transform var(--transition-slow);
+  }
   .sidebar.collapsed { width: var(--sidebar-w) !important; }
   .sidebar.collapsed .sidebar-brand { justify-content: flex-start; padding: 28px 22px; }
   .sidebar.collapsed .brand-text { display: block; }
@@ -980,7 +956,6 @@ tbody tr:hover td { background: rgba(99,102,241,0.04); }
   .sidebar.collapsed .logout-btn::after { display: none; }
   .sidebar.collapsed ~ .content { margin-left: 0; }
   .sidebar.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
-  .sidebar-overlay.open { display: block; }
   .content { margin-left: 0; padding: 76px 12px 20px; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .page-header { flex-direction: column; align-items: flex-start; }

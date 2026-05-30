@@ -250,13 +250,41 @@ function pagination(current, total, limit, callback) {
 }
 
 // ============================================================
-//  Mobile Sidebar Toggle
+//  Sidebar Toggle — Desktop collapses, Mobile slides overlay
 // ============================================================
+function isMobile() {
+  return window.innerWidth <= 768;
+}
+
 function toggleSidebar() {
   var sidebar = document.getElementById('sidebar');
+  if (isMobile()) {
+    var overlay = document.getElementById('sidebarOverlay');
+    sidebar.classList.toggle('open');
+    overlay.classList.toggle('open');
+  } else {
+    sidebar.classList.toggle('collapsed');
+    // Persist collapsed state
+    if (sidebar.classList.contains('collapsed')) {
+      localStorage.setItem('sidebar_collapsed', '1');
+    } else {
+      localStorage.removeItem('sidebar_collapsed');
+    }
+  }
+}
+
+function openMobileSidebar() {
+  var sidebar = document.getElementById('sidebar');
   var overlay = document.getElementById('sidebarOverlay');
-  sidebar.classList.toggle('open');
-  overlay.classList.toggle('open');
+  sidebar.classList.add('open');
+  overlay.classList.add('open');
+}
+
+function closeMobileSidebar() {
+  var sidebar = document.getElementById('sidebar');
+  var overlay = document.getElementById('sidebarOverlay');
+  sidebar.classList.remove('open');
+  overlay.classList.remove('open');
 }
 
 // ============================================================
@@ -270,6 +298,10 @@ function showLogin() {
 function showApp() {
   document.getElementById('loginPage').style.display = 'none';
   document.getElementById('appContainer').style.display = 'block';
+  // Restore sidebar collapsed state
+  if (!isMobile() && localStorage.getItem('sidebar_collapsed') === '1') {
+    document.getElementById('sidebar').classList.add('collapsed');
+  }
   initAppSelection().then(function () {
     // Se so existe 1 app, vai direto pro dashboard
     if (allApps.length <= 1) {
@@ -363,6 +395,7 @@ document.getElementById('loginUser').addEventListener('keypress', function (e) {
 document.getElementById('loginBtn').addEventListener('click', function () { doLogin(); });
 document.getElementById('logoutBtn').addEventListener('click', function () { doLogout(); });
 document.getElementById('sidebarToggle').addEventListener('click', function () { toggleSidebar(); });
+document.getElementById('mobileHamburger').addEventListener('click', function () { toggleSidebar(); });
 
 // Navegação da sidebar via data-nav
 var navItems = document.querySelectorAll('[data-nav]');
@@ -381,7 +414,7 @@ document.getElementById('modalOverlay').addEventListener('click', function (e) {
 
 // Sidebar overlay close
 document.getElementById('sidebarOverlay').addEventListener('click', function () {
-  toggleSidebar();
+  closeMobileSidebar();
 });
 
 // Botão de importar keys - evento registrado via onclick inline no render
@@ -413,11 +446,8 @@ function navigateTo(page) {
     items[i].classList.toggle('active', items[i].getAttribute('data-nav') === page);
   }
 
-  var sidebar = document.getElementById('sidebar');
-  var overlay = document.getElementById('sidebarOverlay');
-  if (sidebar.classList.contains('open')) {
-    sidebar.classList.remove('open');
-    overlay.classList.remove('open');
+  if (isMobile()) {
+    closeMobileSidebar();
   }
 
   var content = document.getElementById('contentArea');
