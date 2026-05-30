@@ -458,7 +458,7 @@ body::before {
   border: 1px solid rgba(255,255,255,0.08);
   border-left: none;
   color: var(--text-muted); cursor: pointer;
-  transition: all var(--transition);
+  transition: opacity var(--transition), width var(--transition), background var(--transition);
   flex-shrink: 0;
   position: fixed;
   left: var(--sidebar-w);
@@ -469,22 +469,6 @@ body::before {
   pointer-events: none;
 }
 
-/* Hover zone: invisível na borda direita da sidebar */
-.sidebar-hover-zone {
-  position: fixed;
-  top: 0; bottom: 0;
-  left: calc(var(--sidebar-w) - 6px);
-  width: 12px;
-  z-index: 200;
-  cursor: pointer;
-}
-
-.sidebar-hover-zone:hover ~ .sidebar-toggle,
-.sidebar-toggle:hover {
-  opacity: 1;
-  pointer-events: auto;
-}
-
 .sidebar-toggle:hover {
   background: rgba(99,102,241,0.15);
   color: var(--accent-hover);
@@ -492,9 +476,25 @@ body::before {
   width: 28px;
 }
 
-/* When collapsed, hover zone follows */
-.sidebar.collapsed ~ .sidebar-hover-zone {
-  left: calc(var(--sidebar-collapsed-w) - 6px);
+/* Hover zone + toggle: aparecem juntos quando hover na sidebar */
+.sidebar-hover-zone {
+  position: fixed;
+  top: 0; bottom: 0;
+  left: calc(var(--sidebar-w) - 6px);
+  width: 40px;
+  z-index: 201;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Toggle aparece quando hover na sidebar ou no toggle */
+.sidebar:hover ~ .sidebar-toggle,
+.sidebar:hover ~ .sidebar-hover-zone,
+.sidebar-toggle:hover,
+.sidebar-hover-zone:hover {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .sidebar-toggle svg {
@@ -507,6 +507,10 @@ body::before {
 
 .sidebar.collapsed + .sidebar-toggle svg {
   transform: rotate(180deg);
+}
+
+.sidebar.collapsed ~ .sidebar-hover-zone {
+  left: calc(var(--sidebar-collapsed-w) - 6px);
 }
 
 /* ============================================================
@@ -979,12 +983,13 @@ tbody tr:hover td { background: rgba(99,102,241,0.04); }
   .sidebar.collapsed ~ .content { margin-left: 0; }
    .sidebar.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
 
-   /* App selector no mobile: fluxo normal abaixo do header */
+   /* App selector no mobile: fica entre o header fixo e o content */
    .app-selector-bar {
-     position: relative;
+     position: static;
      top: auto; margin-top: 60px;
-     padding: 0 12px;
-     height: 48px;
+     padding: 10px 12px;
+     height: auto;
+     min-height: 48px;
      z-index: 50;
    }
    .app-selector-bar .app-trigger {
