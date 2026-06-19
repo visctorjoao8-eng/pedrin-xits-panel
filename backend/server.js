@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const cors = require('cors');
 const path = require('path');
 const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 // ============================================================
@@ -16,6 +17,11 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "1";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "1";
+
+// ⚠️ Aviso de segurança se credenciais padrão forem usadas
+if (ADMIN_USERNAME === '1' || ADMIN_PASSWORD === '1') {
+  process.stderr.write('[SECURITY] ⚠️  AVISO: Admin usando credenciais padrão fracas! Defina ADMIN_USERNAME e ADMIN_PASSWORD no ambiente.\n');
+}
 
 // Default app legacy constants (used when no app_id is specified or for backwards compat)
 const DEFAULT_APP_NAME = "Pedrin Xits";
@@ -33,10 +39,51 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
+// CORS - restringe origens permitidas
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : true; // aceita tudo em dev; defina ALLOWED_ORIGINS em prod
+
 app.use(cors({
-  origin: true,
+  origin: allowedOrigins,
   credentials: true
 }));
+
+// ============================================================
+//  Rate Limiters
+// ============================================================
+
+// Rate limit agressivo para login admin (5 tentativas / 15 min por IP)
+const adminLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Muitas tentativas de login. Tente novamente em 15 minutos.' },
+  skipSuccessfulRequests: true,
+});
+
+// Rate limit geral para a API pública (120 req / min por IP)
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Muitas requisições. Tente novamente em instantes.' },
+});
+
+// Rate limit para rotas admin (200 req / min por IP)
+const adminLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Muitas requisições. Tente novamente em instantes.' },
+});
+
+app.use('/license', apiLimiter);
+app.use('/admin/login', adminLoginLimiter);
+app.use('/admin', adminLimiter);
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public'), {
   etag: false,
@@ -585,19 +632,29 @@ app.post('/license/check', async (req, res) => {
 // POST /admin/login
 app.post('/admin/login', async (req, res) => {
   try {
-  const { username, password } = req.body;
+    const { username, password } = req.body;
 
-  if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-    const token = jwt.sign({ username, role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
-    await addLog('admin_login', `Admin logged in`, req.ip);
-    return res.json({ success: true, token });
-  }
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: 'Credenciais obrigatórias' });
+    }
 
-  await addLog('admin_login_fail', `Failed login attempt: ${username}`, req.ip);
-  return res.json({ success: false, message: 'Invalid credentials' });
+    // Comparação segura contra timing attacks
+    const usernameMatch = username.length === ADMIN_USERNAME.length &&
+      crypto.timingSafeEqual(Buffer.from(username), Buffer.from(ADMIN_USERNAME));
+    const passwordMatch = password.length === ADMIN_PASSWORD.length &&
+      crypto.timingSafeEqual(Buffer.from(password), Buffer.from(ADMIN_PASSWORD));
+
+    if (usernameMatch && passwordMatch) {
+      const token = jwt.sign({ username, role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
+      await addLog('admin_login', `Admin logged in`, req.ip);
+      return res.json({ success: true, token });
+    }
+
+    await addLog('admin_login_fail', `Failed login attempt: ${username}`, req.ip);
+    return res.status(401).json({ success: false, message: 'Invalid credentials' });
   } catch (err) {
     console.error('[ADMIN] Erro no login:', err.message);
-    return res.json({ success: false, message: 'Server error' });
+    return res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
