@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: pedrin-xits-panel
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm audit signatures
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 20
+      - key: DATABASE_URL
+        value: "postgresql://neondb_owner:npg_R7W0oDfMpjOZ@ep-square-cell-aq5wc419.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require"
+      - key: ADMIN_USERNAME
+        value: "1"
+      - key: ADMIN_PASSWORD
+        value: "1"
+      - key: JWT_SECRET
+        value: "pedrin-xits-jwt-secret-2024-prod-key-abc123"

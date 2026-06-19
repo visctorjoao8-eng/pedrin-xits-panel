@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: pedrin-xits-panel
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm audit signatures
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 20
+      - key: DATABASE_URL
+        value: "postgresql://postgres.nzybhmghhjtzdzfxqdyu:minhasenhasupabe123%40pedrin@aws-1-sa-east-1.pooler.supabase.com:6543/postgres"
+      - key: ADMIN_USERNAME
+        value: "1"
+      - key: ADMIN_PASSWORD
+        value: "1"
+      - key: JWT_SECRET
+        value: "pedrin-xits-jwt-secret-2024-prod-key-abc123"

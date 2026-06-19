@@ -1,0 +1,12 @@
+{
+  "name": "keyauth",
+  "version": "1.0.0",
+  "description": "Multi-app authentication system",
+  "scripts": {
+    "dev": "cd backend && npm run dev",
+    "start": "cd backend && npm start"
+  },
+  "dependencies": {
+    "pg": "^8.22.0"
+  }
+}
