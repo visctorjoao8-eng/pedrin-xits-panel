@@ -1,20 +1,19 @@
 services:
   - type: web
-    name: pedrin-xits-panel
+    name: bot-discord-pedrin
     runtime: node
-    plan: free
-    buildCommand: npm install && npm audit signatures
-    startCommand: node server.js
+    buildCommand: npm install
+    startCommand: node index.js
     envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: CLIENT_ID
+        sync: false
+      - key: OWNER_ID
+        sync: false
+      - key: PORT
+        value: 3000
       - key: NODE_ENV
         value: production
-      - key: NODE_VERSION
-        value: 20
-      - key: DATABASE_URL
-        value: "postgresql://postgres.nzybhmghhjtzdzfxqdyu:minhasenhasupabe123%40pedrin@aws-1-sa-east-1.pooler.supabase.com:6543/postgres"
-      - key: ADMIN_USERNAME
-        value: "pedrin_admin"
-      - key: ADMIN_PASSWORD
-        value: "P3dr1n@X1ts#2024!"
-      - key: JWT_SECRET
-        value: "a9f2c8e1b4d7f3a6c9e2b5d8f1a4c7e0b3d6f9a2c5e8b1d4f7a0c3e6b9d2f5a8"
+      - key: LOG_LEVEL
+        value: info
