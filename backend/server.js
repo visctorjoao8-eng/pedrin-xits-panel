@@ -11,6 +11,33 @@ const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 // ============================================================
+//  Dynamic Offsets (Server-Sided)
+// ============================================================
+const DYNAMIC_OFFSETS = {
+  // Exemplo de offsets que antes ficavam no C++. 
+  // Agora só são entregues após login válido.
+  WallTele2_Offset1: 0x20,
+  WallTele2_Offset2: 0x60,
+  BaseAddressOffset: 0x1A2B3C,
+  PlayerHealth: 0x140
+};
+
+function encryptPayload(payloadObj, encryptionKeyStr) {
+  const iv = crypto.randomBytes(16);
+  // O secret do App vira uma chave SHA-256 para AES
+  const key = crypto.createHash('sha256').update(String(encryptionKeyStr)).digest();
+  
+  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  let encrypted = cipher.update(JSON.stringify(payloadObj), 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  
+  return {
+    iv: iv.toString('hex'),
+    data: encrypted
+  };
+}
+
+// ============================================================
 //  Configuração
 // ============================================================
 const PORT = process.env.PORT || 3000;
@@ -508,22 +535,29 @@ app.post('/license/validate', async (req, res) => {
 
     await addLog('key_activated', `Key: ${license_key}, HWID: ${fingerprint}`, clientIp);
 
-    const response = {
+    const payloadData = {
       success: true,
       message: 'License activated successfully',
       session_token: uuidv4(),
       expires_at: expiresAt || 'lifetime',
       username: keyRow.client_name || license_key,
-      app_name: requestAppName || DEFAULT_APP_NAME
+      app_name: requestAppName || DEFAULT_APP_NAME,
+      offsets: DYNAMIC_OFFSETS
     };
 
     if (expiresAt && !keyRow.is_lifetime) {
-      response.days_left = daysUntilExpiry(expiresAt);
+      payloadData.days_left = daysUntilExpiry(expiresAt);
     } else {
-      response.days_left = -1;
+      payloadData.days_left = -1;
     }
 
-    return res.json(response);
+    const encryptedPayload = encryptPayload(payloadData, requestAppSecret);
+
+    return res.json({
+      success: true,
+      encrypted_data: encryptedPayload.data,
+      iv: encryptedPayload.iv
+    });
   }
 
   if (keyRow.status === 'active') {
@@ -550,22 +584,29 @@ app.post('/license/validate', async (req, res) => {
 
     await addLog('validate_ok', `Key: ${license_key}`, clientIp);
 
-    const response2 = {
+    const payloadData2 = {
       success: true,
       message: 'License valid',
       session_token: uuidv4(),
       expires_at: keyRow.expires_at || 'lifetime',
       username: keyRow.client_name || license_key,
-      app_name: requestAppName || DEFAULT_APP_NAME
+      app_name: requestAppName || DEFAULT_APP_NAME,
+      offsets: DYNAMIC_OFFSETS
     };
 
     if (keyRow.expires_at && !keyRow.is_lifetime) {
-      response2.days_left = daysUntilExpiry(keyRow.expires_at);
+      payloadData2.days_left = daysUntilExpiry(keyRow.expires_at);
     } else {
-      response2.days_left = -1;
+      payloadData2.days_left = -1;
     }
 
-    return res.json(response2);
+    const encryptedPayload2 = encryptPayload(payloadData2, requestAppSecret);
+
+    return res.json({
+      success: true,
+      encrypted_data: encryptedPayload2.data,
+      iv: encryptedPayload2.iv
+    });
   }
 
   if (keyRow.status === 'expired') {
